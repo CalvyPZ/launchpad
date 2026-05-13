@@ -504,9 +504,24 @@ Additional code-level bug found: `persistWidgets({ sync: false })` during `init(
 
 ### Execution status (2026-05-13)
 
-- [ ] Backend Dev: diagnostic logging + gitignore fix
-- [ ] Frontend Dev: diagnostic logging + init timestamp fix
-- [ ] QA: structured Pass/Fail verdict
+- [x] **Backend Dev complete** (`e33cd01`): diagnostic logging in `api/server.js` (WIDGETS_PATH startup, writeWidgetsAtomic OK/FAILED, GET updatedAt, PUT payload updatedAt); `data/widgets.json` added to `.gitignore` and removed from git tracking via `git rm --cached`.
+- [x] **Frontend Dev complete** (`a7532e0`): three `[launchpad]` diagnostic log lines added to `js/app.js` (init localTs, reconcile decision, PUT failure); init timestamp fabrication bug fixed in `persistWidgets`/`persistToolsWidgets` + `saveWidgets` in `js/store.js`.
+- [x] **QA static + environment verification complete**: Docker stack started and confirmed clean. All five diagnostic log lines fire correctly in `docker compose logs`. API persistence confirmed: GET returns stale default → PUT updates `updatedAt` → API container restart → GET still returns the POST-PUT timestamp (not the stale default). Served `app.js` and `store.js` contain all fix lines. `node --check` syntax clean on both JS files. `git ls-files data/widgets.json` returns empty.
+
+### QA verdict
+
+**Pass with notes**
+
+- Diagnostic logging: fully working end-to-end (startup, GET, PUT, write success).
+- git-ignore fix: confirmed — `data/widgets.json` no longer tracked; `git reset --hard` in future will not overwrite live data.
+- API persistence across restart: confirmed via local Docker test.
+- Init timestamp bug: statically verified — `saveWidgets` no longer fabricates `new Date()` for null-timestamp init writes; `_reconcilePayloadLocally` will now correctly see `hasLocalTs=false` on fresh private tabs and apply server data.
+- **Note (medium, follow-up):** Full interactive browser verification on the production HTTPS URL (https://web.calvy.com.au) with a real 90-second wait and cross-private-window test was not performed from this workspace (Cloud Agent cannot drive a remote browser session). That verification is strongly recommended as the final human smoke test before closing root cause **A** (process crash cycle) — the logging now in place will surface any remaining crash/restart events in `docker compose logs` on the production server.
+- **Note (low):** Root cause **A** (periodic API crash) cannot be fully ruled out from static analysis. The new logging will definitively confirm or exclude it: if `[api] WIDGETS_PATH resolved to:` appears repeatedly in production logs at ~1 min intervals, the process is restarting and the ops team should investigate via `docker compose logs --timestamps api`.
+
+### Next action
+
+Team Lead recommends: human smoke test on production (https://web.calvy.com.au) — add content, wait 90 seconds, check a fresh private window. If content appears, the fix is complete. If content still resets, check `docker compose logs --timestamps api` on the production server for repeated WIDGETS_PATH startup lines (indicates crash-restart cycle — separate ops/infra issue, not a code defect).
 
 ---
 
