@@ -8,3 +8,11 @@ Test Plan Status
 - Phase: QA recorded PWA verification against `team/lead-status.md` manager brief.
 - Note: Visual refresh v4 sign-off remains with Team Lead; PWA acceptance criteria for client direction are satisfied in static review (see supplement).
 - **Notes & To-Do (2026-05-13):** Cycle 1 — **Pass with notes** (**Verdict — Notes & To-Do (static review 2026-05-13)**). **Cycle 2:** **Pass with notes** then ticker Low closed same day — **### Verdict — QA remediation cycle 3 — ticker hygiene (2026-05-13)** (**Pass**). Remediation DoD met; interactive re-verify in `team/assignments-qa-remediation-v1.md` and supplement still recommended for operational sign-off.
+- **QA remediation cycle 4 (2026-05-13):** `team/assignments-qa-remediation-v2.md` static verification on widget drag/keyboard reorder + add-widget combobox/listbox + CSS pseudo-element + safe-area follow-through.
+  - **Verdict: Pass with notes**
+  - **Findings:** 1 medium (focus and scrollbar pseudo-element selector syntax remains malformed in `css/style.css`) and 1 low (documentation drift in `team/style-guide.md` around manifest filename wording).
+  - **Follow-up status:** Accessibility follow-up track is **not fully closed** until interactive validation confirms corrected keyboard-visible focus behavior after selector fixes.
+- **QA remediation cycle 4 follow-up (2026-05-13):** `team/assignments-qa-remediation-v2.md` re-check after frontend follow-up.
+  - **Verdict: Pass**
+  - **Findings:** No new static findings from the remaining scope.
+  - **Confirmed:** `css/style.css` pseudo selectors normalized; `team/style-guide.md` manifest reference aligned to `manifest.json`; picker semantics and drag-handle accessibility remain unchanged from previous v2 contract.

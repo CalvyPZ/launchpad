@@ -14,36 +14,30 @@ function isDashboardOnline(dashboard) {
 function librariesMissingMessage(dashboard) {
   const online = isDashboardOnline(dashboard);
   if (!online) {
-    return "<p class=\"notes-md-fallback\">You appear offline. Markdown preview needs the preview libraries from the network. Reconnect to load them, or use <strong>Source only</strong> to keep editing.</p>";
+    return "<p class=\"notes-md-fallback\">You appear offline. Reconnect to load the markdown preview libraries, or switch to <strong>Source only</strong>.</p>";
   }
-  return "<p class=\"notes-md-fallback\">Preview libraries are still loading. If this message stays, check your connection or ad blocker, or switch to <strong>Source only</strong>.</p>";
+  return "<p class=\"notes-md-fallback\">Markdown preview libraries are still loading. If this message stays, check your network or ad blocker, or switch to <strong>Source only</strong>.</p>";
 }
 
-function renderMarkdownToSafeHtml(src, dashboard) {
+async function renderMarkdownToSafeHtml(src, dashboard) {
   const marked = getMarked();
   const DOMPurify = getPurify();
   if (!marked || !DOMPurify) {
-    return librariesMissingMessage(dashboard);
+    return { html: librariesMissingMessage(dashboard) };
   }
   const srcStr = String(src || "");
-  let rawHtml;
   try {
-    if (typeof marked.parse === "function") {
-      rawHtml = marked.parse(srcStr, { async: false });
-    } else if (typeof marked === "function") {
-      rawHtml = marked(srcStr);
-    } else {
-      rawHtml = "";
-    }
-  } catch {
-    return "<p class=\"notes-md-fallback\">Preview could not be parsed. Check your Markdown syntax.</p>";
+    const parsed = typeof marked.parse === "function" ? marked.parse(srcStr, { async: false }) : marked(srcStr);
+    const rawHtml = await Promise.resolve(parsed).catch(() => "");
+    return {
+      html: DOMPurify.sanitize(String(rawHtml ?? ""), { USE_PROFILES: { html: true } }),
+    };
+  } catch (error) {
+    console.error("Failed to render markdown preview", error);
+    return {
+      html: "<p class=\"notes-md-fallback\">Preview could not be parsed. Check your Markdown syntax.</p>",
+    };
   }
-
-  if (rawHtml != null && typeof rawHtml.then === "function") {
-    return { async: true, promise: rawHtml.then((html) => String(html ?? "")).catch(() => "") };
-  }
-
-  return { async: false, html: DOMPurify.sanitize(String(rawHtml), { USE_PROFILES: { html: true } }) };
 }
 
 export function render(container, context) {
@@ -83,27 +77,11 @@ export function render(container, context) {
   const persist = () => dashboard.persistWidgets();
 
   let previewSeq = 0;
-  const applyPreviewHtml = () => {
-    const DOMPurify = getPurify();
+  const applyPreviewHtml = async () => {
     const seq = ++previewSeq;
-    const result = renderMarkdownToSafeHtml(textarea.value, dashboard);
-    if (typeof result === "string") {
-      preview.innerHTML = result;
-      return;
-    }
-    if (result.async && result.promise) {
-      preview.innerHTML =
-        "<p class=\"notes-md-fallback\">Rendering preview…</p>";
-      result.promise.then((html) => {
-        if (previewSeq !== seq || !getPurify()) return;
-        preview.innerHTML = getPurify().sanitize(String(html), { USE_PROFILES: { html: true } });
-      }).catch(() => {
-        if (previewSeq !== seq) return;
-        preview.innerHTML =
-          "<p class=\"notes-md-fallback\">Preview could not be rendered.</p>";
-      });
-      return;
-    }
+    preview.innerHTML = "<p class=\"notes-md-fallback\">Rendering preview…</p>";
+    const result = await renderMarkdownToSafeHtml(textarea.value, dashboard);
+    if (previewSeq !== seq) return;
     preview.innerHTML = result.html || "";
   };
 

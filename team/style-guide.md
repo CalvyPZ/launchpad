@@ -57,6 +57,19 @@
 - Hover actions use border-lightening + small lift.
 - Use `rgba` accents for subtle depth accents, avoid heavy bloom.
 
+## App shell navigation (Home / Tools)
+
+- **Placement:** A compact **primary nav** sits directly under the site header (`nav.app-nav`), full width, `surface` background and `border` bottom edge (same band as header chrome).
+- **Tabs:** `button.nav-tab` — uppercase, tracked label (`~0.8rem`, `font-weight: 500`), inactive `text-2`, active `text-1` with a **2px bottom border** in `accent` (`#2dd4bf`). Hover/focus raises label to `text-1` without a filled pill background.
+- **Semantics:** Tabs use `role="tablist"` / `role="tab"` with `aria-selected` and `tabindex` roving on the active tab only; each page panel uses `aria-hidden` when off-screen so assistive tech focuses the visible surface.
+- **Keyboard:** Tab into the tablist, activate with **Space** or **Enter**; **Arrow keys** are not wired for roving (optional follow-up).
+
+## Page transition (Home ↔ Tools)
+
+- **Mechanism:** A horizontal **track** (`.pages-track`, `width: 200%`) holds two **panels** (`.page-panel`, `width: 50%` each) inside a clipping **viewport** (`.pages-viewport`, `overflow: hidden`). Switching pages toggles a modifier class: **Home** → `transform: translateX(0)`; **Tools** → `transform: translateX(-50%)` (half the track width = one viewport).
+- **Motion:** `320ms` `cubic-bezier(0.4, 0, 0.2, 1)` on `transform` only — calm, not intrusive; no full document navigation or reload.
+- **State:** Page choice is client-side only (`currentPage` on the Alpine root); each page owns its widget list and **separate** `localStorage` (`calvybots_widgets` vs `calvybots_tools_widgets`).
+
 ## Component patterns
 
 - Card (`.dash-widget`): gradient fill, soft border, lift on hover.
@@ -70,6 +83,7 @@
 - Hover: keep to short duration, subtle movement.
 - Focus: visible `:focus-visible` and consistent contrast.
 - Touch: minimum `42px` controls for mobile.
+- Add-widget control now uses a keyboard-operable combobox/listbox pattern: open/close with Enter/Space/Arrow keys and close/return focus on Escape.
 
 ## Motion
 
@@ -82,10 +96,11 @@
 - No duplicated widget titles.
 - Icon-only controls require clear accessible names.
 - All controls must have clear names and labels.
+- Widget drag handles use accessible names (`aria-label`) and support keyboard reorder with arrow keys while in edit mode.
 
 ## Mobile web app bookmarking
 
-- `manifest.webmanifest` present with:
+- `manifest.json` present with:
   - `display: standalone`
   - `start_url`
   - `scope`
@@ -93,7 +108,7 @@
   - `background_color`
   - `icons`
 - `apple-mobile-web-app-capable` metadata should be available.
-- Add safe-area padding when the app runs in standalone mode.
+- Add safe-area padding in shell and layout containers using `env(safe-area-inset-*)` with non-safe-area fallbacks.
 
 ## To-Do widget (v4)
 

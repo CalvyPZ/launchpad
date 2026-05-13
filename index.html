@@ -123,10 +123,15 @@
               <div class="relative" x-show="editMode">
                 <button
                   type="button"
+                  x-ref="addWidgetButton"
                   class="inline-flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90"
-                  @click="addWidgetOpen = !addWidgetOpen"
+                  @click="toggleAddWidgetPicker()"
+                  @keydown="handleAddWidgetTriggerKeydown($event)"
                   aria-haspopup="listbox"
+                  aria-controls="widget-picker-list"
+                  role="combobox"
                   :aria-expanded="addWidgetOpen"
+                  :aria-activedescendant="addWidgetOpen ? addWidgetActiveOptionId : null"
                   aria-label="Add widget"
                 >
                   <span aria-hidden="true">＋</span>
@@ -135,6 +140,8 @@
 
                 <!-- Picker dropdown -->
                 <div
+                  id="widget-picker-list"
+                  x-ref="addWidgetList"
                   class="widget-picker"
                   x-show="addWidgetOpen"
                   x-transition:enter="transition ease-out duration-100"
@@ -143,20 +150,28 @@
                   x-transition:leave="transition ease-in duration-75"
                   x-transition:leave-start="opacity-100 translate-y-0"
                   x-transition:leave-end="opacity-0 translate-y-1"
-                  @click.outside="addWidgetOpen = false"
+                  @click.outside="closeAddWidgetPicker(true)"
+                  @keydown="handleAddWidgetOptionKeydown($event)"
                   role="listbox"
                   aria-label="Choose a widget to add"
                 >
                   <p class="widget-picker-label">Add a widget</p>
-                  <button type="button" role="option" @click="addWidget('clock')">
-                    <span aria-hidden="true">🕐</span> Clock
-                  </button>
-                  <button type="button" role="option" @click="addWidget('notes')">
-                    <span aria-hidden="true">📝</span> Sticky Notes
-                  </button>
-                  <button type="button" role="option" @click="addWidget('todo')">
-                    <span aria-hidden="true">✅</span> To-Do
-                  </button>
+                  <template x-for="(option, index) in getAddWidgetPickerOptions()" :key="option.type">
+                    <button
+                      x-ref="addWidgetOption"
+                      type="button"
+                      role="option"
+                      class="widget-picker-option"
+                      :class="addWidgetPickerIndex === index ? 'is-active' : ''"
+                      :aria-selected="addWidgetPickerIndex === index"
+                      :tabindex="addWidgetPickerIndex === index ? 0 : -1"
+                      :id="`add-widget-option-${option.type}`"
+                      @click="activateAddWidgetOption(index)"
+                    >
+                      <span aria-hidden="true" x-text="option.icon"></span>
+                      <span x-text="option.label"></span>
+                    </button>
+                  </template>
                 </div>
               </div>
 
@@ -173,12 +188,62 @@
         </div>
       </header>
 
-      <!-- Widget grid -->
-      <main class="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
-        <section id="widget-grid" x-ref="widgetGrid" class="widget-grid">
-          <!-- Widgets injected by app.js -->
-        </section>
-      </main>
+      <!-- Primary navigation (Home / Tools) -->
+      <nav class="app-nav border-b border-border bg-surface" aria-label="Primary">
+        <div class="mx-auto max-w-6xl px-5">
+          <div class="flex gap-0" role="tablist" aria-orientation="horizontal">
+            <button
+              type="button"
+              role="tab"
+              class="nav-tab"
+              id="tab-home"
+              :class="currentPage === 'home' ? 'nav-tab-active' : ''"
+              :aria-selected="currentPage === 'home'"
+              :tabindex="currentPage === 'home' ? 0 : -1"
+              @click="navigateTo('home')"
+            >
+              Home
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="nav-tab"
+              id="tab-tools"
+              :class="currentPage === 'tools' ? 'nav-tab-active' : ''"
+              :aria-selected="currentPage === 'tools'"
+              :tabindex="currentPage === 'tools' ? 0 : -1"
+              @click="navigateTo('tools')"
+            >
+              Tools
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <div class="pages-viewport flex-1 min-h-0 w-full">
+        <div
+          class="pages-track"
+          :class="currentPage === 'tools' ? 'pages-track--tools' : 'pages-track--home'"
+        >
+          <!-- Home page -->
+          <div class="page-panel" id="page-home" :aria-hidden="currentPage !== 'home'">
+            <main class="mx-auto w-full max-w-6xl px-5 py-6">
+              <section id="widget-grid" x-ref="widgetGrid" class="widget-grid">
+                <!-- Widgets injected by app.js -->
+              </section>
+            </main>
+          </div>
+
+          <!-- Tools page -->
+          <div class="page-panel" id="page-tools" :aria-hidden="currentPage !== 'tools'">
+            <main class="mx-auto w-full max-w-6xl px-5 py-6">
+              <section id="tools-grid" x-ref="toolsGrid" class="widget-grid">
+                <!-- Tools widgets injected by app.js -->
+              </section>
+            </main>
+          </div>
+        </div>
+      </div>
 
       <footer class="border-t border-border py-3 text-center text-xs text-text-3">
         Calvy Launchpad

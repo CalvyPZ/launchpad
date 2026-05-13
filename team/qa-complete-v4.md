@@ -132,3 +132,68 @@ Leave blank until QA executes against a candidate build; Team Lead updates prior
 ### Verdict — QA remediation cycle 3 — ticker hygiene (2026-05-13)
 
 **Pass** (static). Confirms the todo-reset interval is cleared while the document is hidden and re-armed when visible, matching the remediation checklist intent. No further code findings from this pass.
+
+### Verdict — QA remediation cycle 4 — widget reorder, picker semantics, CSS pseudo/area checks (2026-05-13)
+
+**Pass with notes.**
+
+**Scope verified:** `team/assignments-qa-remediation-v2.md` against `js/app.js`, `index.html`, `css/style.css`, `team/style-guide.md`, and `team/lead-status.md`.
+
+**Findings**
+
+1. **Medium — malformed pseudo-element selectors**
+   - `css/style.css:387` uses `::focus-visible` (invalid pseudo-element form).
+   - `css/style.css:397`, `css/style.css:401`, `css/style.css:405`, `css/style.css:410` use `:::-webkit-scrollbar*` (invalid syntax).
+   - **Expected:** global focus styling and scrollbar tracks to follow CSS pseudo-element syntax (`:focus-visible`, `::-webkit-scrollbar*`).
+   - **Actual:** style rules are not applied by user agents, which removes a guaranteed focus indicator path for keyboard users and leaves custom scrollbar defaults in place.
+   - **Owner:** Frontend Dev.
+
+2. **Low — docs token wording drift**
+   - `team/style-guide.md:90` still references `manifest.webmanifest`.
+   - **Expected:** visible docs for implementation to reference current manifest source path (`manifest.json` in `index.html` and PWA wiring).
+   - **Actual:** style guide text is stale from prior wording and is now out of sync with the concrete shell markup.
+   - **Owner:** Frontend Dev (doc alignment).
+
+**What passed**
+
+- `js/app.js`: drag handle has explicit `aria-label` (`js/app.js:260`) and keyboard reorder keys (`js/app.js:498` and `js/app.js:540`).
+- `index.html`: Add Widget button uses combobox controls and picker uses listbox/option roles with keyboard event handlers on open/close and activation (`index.html:124-175`, `index.html:180-183`, `index.html:141-156`, `index.html:159-173`).
+- `css/style.css`: safe-area inset usage is present in shell/mobile containers and non-safe-area fallback values are included (`css/style.css:24-27`, `30-42`, `34-42`, `40-42`).
+- `team/style-guide.md` and `team/lead-status.md` contain follow-up scope and result notes that match this remediated path (`team/style-guide.md:73-90`, `team/lead-status.md:140-160`).
+
+**Interactive follow-ups (required before formal sign-off)**
+
+- Confirm keyboard focus visibility in-browser on handle and option controls after loading in Firefox and Safari.
+- Validate add-widget combobox open/close/navigation under real keyboard only flow on tabbed navigation.
+- Verify custom safe-area padding under iOS standalone launch and that visible keyboard focus states are reachable in narrow layouts.
+
+**Track closure status:** The front-end remediation track is **conditionally closed** from static review; functional sign-off remains **pending** until interactive follow-ups above are completed.
+
+### Verdict — QA re-check (2026-05-13)
+
+**Pass.**
+
+**Scope verified:** remaining `team/assignments-qa-remediation-v2.md` items after the latest frontend follow-up:
+
+- `css/style.css` pseudo-element normalization
+- `team/style-guide.md` manifest filename wording alignment
+- picker semantics and drag-handle accessibility continuity checks
+
+**Findings**
+
+1. **No new static findings / no regressions introduced by follow-up in the above scope.**
+
+**Validated evidence**
+
+- `css/style.css:456` uses valid `:focus-visible`; `css/style.css:466-481` use valid `::-webkit-scrollbar*` selectors, so malformed selector regressions are resolved.
+- `team/style-guide.md:90` now references `manifest.json` and matches current `index.html` PWA wiring.
+- `index.html:124-175` keeps the add-widget combobox/listbox contract introduced for cycle 4.
+- `js/app.js:268-276` keeps icon-only drag handle controls with `aria-label`; `js/app.js:512-552` keeps keyboard reorder controls unchanged.
+
+**Interactive follow-up reminder (unchanged)**
+
+- Confirm keyboard-visible focus and add-widget flow behavior on real browsers (`Firefox` and `Safari`) and `iOS` standalone keyboard/safe-area paths before final launch sign-off.
+
+**Close recommendation**
+
+- Remediation cycle re-check is complete for static verification and is ready for Team Lead sign-off, with only the previously defined interactive follow-ups remaining.

@@ -1,4 +1,6 @@
 const WIDGETS_KEY = "calvybots_widgets";
+/** Tools page widget rows — same row shape as home; types are tools-specific (e.g. `placeholder`). */
+const TOOLS_WIDGETS_KEY = "calvybots_tools_widgets";
 const TITLE_KEY = "calvybots_title";
 /** Legacy single-blob keys — migrated once into first matching widget; then removed. */
 const LEGACY_NOTES_KEY = "calvybots_notes";
@@ -60,6 +62,8 @@ const DEFAULT_WIDGETS = [
   { id: "widget-notes", type: "notes", position: 1 },
   { id: "widget-todo", type: "todo", position: 2 },
 ];
+
+const DEFAULT_TOOLS_WIDGETS = [{ id: "widget-tools-placeholder", type: "placeholder", position: 0 }];
 
 export function defaultNotesState() {
   return { markdown: "", viewMode: "split" };
@@ -324,6 +328,58 @@ function normalise(rawItems) {
   }));
 }
 
+function normaliseToolsRows(rawItems) {
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return DEFAULT_TOOLS_WIDGETS.map((w, i) => ({
+      ...w,
+      position: i,
+      visible: true,
+      minWidth: DEFAULT_MIN_WIDTH,
+      minHeight: DEFAULT_MIN_HEIGHT,
+    }));
+  }
+
+  const valid = rawItems
+    .map((item, index) => {
+      const type = typeof item?.type === "string" ? item.type : null;
+      if (type !== "placeholder") return null;
+      const id = String(item.id || `placeholder-${Date.now()}-${index}`);
+      const position = clampToNumber(item.position, index);
+      const visible = item.visible !== false;
+      const title = typeof item.title === "string" ? item.title : "";
+      const minWidth = clampToNumber(item.minWidth, DEFAULT_MIN_WIDTH);
+      const minHeight = clampToNumber(item.minHeight, DEFAULT_MIN_HEIGHT);
+      const width =
+        item.width == null || item.width === "" ? null : clampToNumber(item.width, NaN);
+      const height =
+        item.height == null || item.height === "" ? null : clampToNumber(item.height, NaN);
+
+      return {
+        id,
+        type: "placeholder",
+        position,
+        visible,
+        title,
+        minWidth,
+        minHeight,
+        width: width == null || Number.isNaN(width) ? null : width,
+        height: height == null || Number.isNaN(height) ? null : height,
+      };
+    })
+    .filter(Boolean)
+    .filter((item) => item.visible !== false)
+    .sort((a, b) => a.position - b.position);
+
+  if (!valid.length) {
+    return normaliseToolsRows(null);
+  }
+
+  return valid.map((item, index) => ({
+    ...item,
+    position: index,
+  }));
+}
+
 export function loadWidgets() {
   try {
     const stored = localStorage.getItem(WIDGETS_KEY);
@@ -379,6 +435,53 @@ export function saveWidgets(widgets) {
     })
     .sort((a, b) => a.position - b.position);
   localStorage.setItem(WIDGETS_KEY, JSON.stringify(payload));
+}
+
+export function loadToolsWidgets() {
+  try {
+    const stored = localStorage.getItem(TOOLS_WIDGETS_KEY);
+    if (!stored) {
+      const fresh = normaliseToolsRows(null);
+      evaluateAllTodoResets(fresh);
+      return fresh;
+    }
+    const parsed = JSON.parse(stored);
+    let widgets = normaliseToolsRows(parsed);
+    evaluateAllTodoResets(widgets);
+    return widgets;
+  } catch {
+    const fallback = normaliseToolsRows(null);
+    evaluateAllTodoResets(fallback);
+    return fallback;
+  }
+}
+
+export function saveToolsWidgets(widgets) {
+  const payload = (widgets || [])
+    .map((widget, index) => {
+      const row = {
+        id: widget.id,
+        type: widget.type,
+        position: index,
+        visible: widget.visible !== false,
+        title: typeof widget.title === "string" ? widget.title : "",
+        minWidth: clampToNumber(widget.minWidth, DEFAULT_MIN_WIDTH),
+        minHeight: clampToNumber(widget.minHeight, DEFAULT_MIN_HEIGHT),
+        width:
+          widget.width == null || widget.width === ""
+            ? null
+            : clampToNumber(widget.width, NaN),
+        height:
+          widget.height == null || widget.height === ""
+            ? null
+            : clampToNumber(widget.height, NaN),
+      };
+      if (row.width != null && Number.isNaN(row.width)) row.width = null;
+      if (row.height != null && Number.isNaN(row.height)) row.height = null;
+      return row;
+    })
+    .sort((a, b) => a.position - b.position);
+  localStorage.setItem(TOOLS_WIDGETS_KEY, JSON.stringify(payload));
 }
 
 const DEFAULT_SITE_TITLE = "Calvy Launchpad";
