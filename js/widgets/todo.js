@@ -204,11 +204,11 @@ export function render(container, context) {
 
   const syncCurrentWidget = () => {
     writeTasksForWidget(currentWidgetId, items);
-    const id = currentWidgetId;
-    if (dashboard.widgets?.some((w) => w?.id === id)) {
+    const id = String(currentWidgetId);
+    if (dashboard.widgets?.some((w) => String(w?.id || "") === id)) {
       dashboard.persistWidgets();
     }
-    if (dashboard.toolsWidgets?.some((w) => w?.id === id) && typeof dashboard.persistToolsWidgets === "function") {
+    if (dashboard.toolsWidgets?.some((w) => String(w?.id || "") === id) && typeof dashboard.persistToolsWidgets === "function") {
       dashboard.persistToolsWidgets();
     }
   };
