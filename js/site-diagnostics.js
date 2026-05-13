@@ -7,7 +7,8 @@ const LOG_CAP = 500;
 const PROBE_INTERVAL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 5000;
 const ALPINE_PROBE_URL = "https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js";
-const SENTINEL_KEY = "calvybots_diag_sentinel";
+const SENTINEL_KEY = "launchpad_diag_sentinel";
+const SENTINEL_KEY_LEGACY = "calvybots_diag_sentinel";
 const SW_CONTROLLER_WAIT_MS = 2_500;
 
 /** @typedef {{ ts: string, level: 'log'|'info'|'warn'|'error', source: string, message: string, detail?: string }} LogEntry */
@@ -45,6 +46,46 @@ let swControllerPendingStateSeen = false;
 
 function isoNow() {
   return new Date().toISOString();
+}
+
+function readStorageValue(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageValue(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorageValue(key) {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runStorageProbeWithFallback() {
+  const keys = [SENTINEL_KEY, SENTINEL_KEY_LEGACY];
+  for (const key of keys) {
+    if (!key) continue;
+    const written = writeStorageValue(key, "1");
+    if (!written) continue;
+    const readback = readStorageValue(key);
+    if (readback !== "1") continue;
+    if (!removeStorageValue(key)) continue;
+    return { status: "ok", key };
+  }
+  return { status: "failed" };
 }
 
 function notifyLogs() {
@@ -310,15 +351,15 @@ async function probeSameOrigin() {
 async function probeLocalStorage() {
   const at = isoNow();
   try {
-    localStorage.setItem(SENTINEL_KEY, "1");
-    const v = localStorage.getItem(SENTINEL_KEY);
-    localStorage.removeItem(SENTINEL_KEY);
-    if (v !== "1") {
+    const probe = runStorageProbeWithFallback();
+    if (probe.status !== "ok") {
       return {
         id: "storage",
         label: "localStorage",
         status: "crit",
-        detail: "Read after write mismatch",
+        detail: probe.key
+          ? `Storage probe failed to read/write key ${probe.key}`
+          : "Read after write mismatch",
         at,
       };
     }

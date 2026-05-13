@@ -1,10 +1,62 @@
 ﻿const CONFIG_URL = 'data/config.json';
-const USER_CONFIG_KEY = 'calvybots_user_config';
+const USER_CONFIG_KEY = 'launchpad_user_config';
+const USER_CONFIG_KEY_LEGACY = 'calvybots_user_config';
 
 let loaded = false;
 let baseConfig = {};
 let userConfig = {};
 let mergedConfig = {};
+
+function readStorageValue(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageValue(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getStorageString(primaryKey, legacyKey) {
+  const parse = (raw) => {
+    if (typeof raw !== "string" || !raw.trim()) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
+
+  const primaryRaw = readStorageValue(primaryKey);
+  const primaryParsed = parse(primaryRaw);
+  if (primaryRaw != null && primaryParsed != null) {
+    return { value: primaryRaw, parsed: primaryParsed, key: primaryKey };
+  }
+  if (!legacyKey) {
+    return null;
+  }
+  const legacyRaw = readStorageValue(legacyKey);
+  const legacyParsed = parse(legacyRaw);
+  if (legacyRaw != null && legacyParsed != null) {
+    return { value: legacyRaw, parsed: legacyParsed, key: legacyKey };
+  }
+  return null;
+}
+
+function persistUserConfig(value) {
+  const payload = JSON.stringify(value);
+  writeStorageValue(USER_CONFIG_KEY, payload);
+  if (USER_CONFIG_KEY_LEGACY && USER_CONFIG_KEY_LEGACY !== USER_CONFIG_KEY) {
+    writeStorageValue(USER_CONFIG_KEY_LEGACY, payload);
+  }
+}
 
 function clone(value) {
   if (typeof structuredClone === 'function') {
@@ -16,12 +68,14 @@ function clone(value) {
 
 function readUserOverridesFromStorage() {
   try {
-    const raw = localStorage.getItem(USER_CONFIG_KEY);
-    if (!raw) {
+    const entry = getStorageString(USER_CONFIG_KEY, USER_CONFIG_KEY_LEGACY);
+    if (!entry) {
       return {};
     }
-
-    const parsed = JSON.parse(raw);
+    const parsed = entry.parsed ?? null;
+    if (!parsed) {
+      return {};
+    }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {};
     }
@@ -137,7 +191,7 @@ async function initialize() {
 
   const storage = getStorage();
   if (storage) {
-    storage.setItem(USER_CONFIG_KEY, JSON.stringify(userConfig));
+    persistUserConfig(userConfig);
   }
 
   emitUpdatedConfig(mergedConfig);
@@ -157,7 +211,7 @@ export async function updateConfig(path, value) {
   const storage = getStorage();
   if (storage) {
     try {
-      storage.setItem(USER_CONFIG_KEY, JSON.stringify(userConfig));
+      persistUserConfig(userConfig);
     } catch {
       // Ignore storage errors on private mode or blocked storage.
     }

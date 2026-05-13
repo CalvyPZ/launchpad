@@ -1,7 +1,7 @@
 {
-  "name": "calvybots-api",
+  "name": "launchpad-api",
   "version": "1.0.0",
-  "description": "CalvyBots Launchpad — lightweight API sidecar (health, system, config)",
+  "description": "Launchpad — lightweight API sidecar (health, system, config)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

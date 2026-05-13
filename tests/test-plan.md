@@ -1,9 +1,9 @@
-# CalvyBots — Test Plan
+# Launchpad — Test Plan
 
 ## 1. Scope
 
 ### 1.1 Purpose
-Validate the CalvyBots dashboard as a static web app delivered by nginx with no build pipeline or server-side runtime, focusing on front-end behavior, local storage persistence, widget module behavior, and static delivery guarantees.
+Validate the Launchpad dashboard as a static web app delivered by nginx with no build pipeline or server-side runtime, focusing on front-end behavior, local storage persistence, widget module behavior, and static delivery guarantees.
 
 ### 1.2 In Scope
 - Frontend page and widget behavior in modern browsers.
@@ -285,7 +285,7 @@ Validate the CalvyBots dashboard as a static web app delivered by nginx with no 
 #### FE-028 localStorage corruption recovery
 - **Description**: Validate recovery when stored JSON is invalid.
 - **Steps**
-  1. Manually inject invalid JSON under app storage key(s).
+  1. Manually inject invalid JSON under app storage key(s) (for example `launchpad_widgets` or legacy fallback keys such as `calvybots_widgets`).
   2. Reload dashboard.
 - **Expected result**: App handles invalid payload gracefully and falls back to safe defaults.
 - **Pass criteria**: No unhandled exception; app renders with fallback or prompt.
@@ -298,10 +298,10 @@ Validate the CalvyBots dashboard as a static web app delivered by nginx with no 
 - **Expected result**: App notifies user and avoids crash.
 - **Pass criteria**: Save failure is handled with non-destructive fallback.
 
-#### FE-030 Storage key version migration
+#### FE-030 Storage key namespace migration
 - **Description**: Validate backward-compatible reading when storage format changes.
 - **Steps**
-  1. Seed storage using previous schema shape.
+  1. Seed storage using previous schema shape and legacy `calvybots_*` keys.
   2. Load app and save state.
 - **Expected result**: Old data migrates or merges correctly.
 - **Pass criteria**: No data loss for supported fields and widgets render with sane defaults for missing fields.
@@ -578,7 +578,7 @@ Validate the CalvyBots dashboard as a static web app delivered by nginx with no 
 #### IN-003 Config + store merge precedence
 - **Description**: Verify precedence when config and localStorage both define state.
 - **Steps**
-  1. Seed localStorage with modified data and keep config default.
+  1. Seed `launchpad_*` localStorage key(s) with modified data and keep config default.
   2. Load app.
 - **Expected result**: Save precedence rule is honored (documented by existing behavior).
 - **Pass criteria**: Result matches intended source of truth policy.

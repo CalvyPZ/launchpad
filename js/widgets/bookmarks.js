@@ -1,4 +1,5 @@
-const BOOKMARKS_KEY = "calvybots_bookmarks";
+const BOOKMARKS_KEY = "launchpad_bookmarks";
+const BOOKMARKS_KEY_LEGACY = "calvybots_bookmarks";
 
 const DEFAULT_BOOKMARKS = [
   {
@@ -29,7 +30,19 @@ const DEFAULT_BOOKMARKS = [
 
 function loadBookmarks() {
   try {
-    const raw = localStorage.getItem(BOOKMARKS_KEY);
+    let raw = null;
+    try {
+      raw = localStorage.getItem(BOOKMARKS_KEY);
+    } catch {
+      raw = null;
+    }
+    if (raw == null) {
+      try {
+        raw = localStorage.getItem(BOOKMARKS_KEY_LEGACY);
+      } catch {
+        raw = null;
+      }
+    }
     if (!raw) return [...DEFAULT_BOOKMARKS];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) && parsed.length
@@ -41,7 +54,13 @@ function loadBookmarks() {
 }
 
 function saveBookmarks(items) {
-  localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(items));
+  const serialized = JSON.stringify(items);
+  try {
+    localStorage.setItem(BOOKMARKS_KEY, serialized);
+    localStorage.setItem(BOOKMARKS_KEY_LEGACY, serialized);
+  } catch {
+    /* ignore storage errors */
+  }
 }
 
 function createItem(item, isEditMode, onDelete) {
@@ -75,7 +94,6 @@ export function render(container, { editMode = false } = {}) {
   let list = loadBookmarks();
   container.className = "h-full";
   container.innerHTML = `
-    <div class="widget-title">Bookmarks</div>
     <div class="bookmark-list" data-bookmark-list></div>
     <div class="mt-3 ${editMode ? "" : "hidden"}">
       <button

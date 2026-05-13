@@ -31,22 +31,24 @@ Top-level keys:
 
 ## 2) localStorage keys
 
-All runtime state is persisted under the `calvybots_` namespace.
+Canonical runtime keys now use the `launchpad_` namespace with fallback reads from legacy `calvybots_*` keys for migration compatibility.
 
-- `calvybots_user_config`
+- `launchpad_user_config` (legacy `calvybots_user_config`)
   - Shape: `{ schemaVersion: number, value: object }`
   - Value is user override object applied on top of `config.json` using dot-path updates.
   - Used by `js/config-loader.js` for startup merge and updates.
-- `calvybots_widgets`
+- `launchpad_widgets` (legacy `calvybots_widgets`)
   - Shape: `{ schemaVersion: number, value: object }`
   - Example value: `{ "layout": [...], "hidden": [...] }`
   - Used for widget layout/visibility in `js/store.js`.
-- `calvybots_notes`
-  - Shape: `{ schemaVersion: number, value: string }`
-  - Free-form note content for notes widget.
-- `calvybots_bookmarks`
-  - Shape: `{ schemaVersion: number, value: Array<{ id, label, url, icon? }> }`
-  - User-managed bookmarks overriding or extending defaults.
+- `calvybots_notes` / `calvybots_todo` (legacy, migrated into embedded widget state and removed once merged)
+  - Shape: legacy single-blob documents read during migration only.
+- `launchpad_bookmarks` (legacy `calvybots_bookmarks`)
+  - Shape: JSON array `[{ id, title, url, icon? }]` persisted by the dormant bookmarks widget for legacy compatibility reads and writes.
+- `launchpad_search_engine` (legacy `calvybots_search_engine`)
+  - Shape: `"google" | "duckduckgo" | "bing"` persisted by the dormant search widget for legacy compatibility reads and writes.
+
+Migration rationale is implemented in `js/store.js`, `js/config-loader.js`, `js/widgets/search.js`, and `js/widgets/bookmarks.js`, with `launchpad_*` as source-of-truth.
 
 The `schemaVersion` is managed in `js/store.js` as part of migration logic. Any mismatch resets that key to default.
 

@@ -4,11 +4,13 @@ services:
     container_name: web_app_api
     restart: unless-stopped
     working_dir: /app
-    command: sh -c "mkdir -p /data; if [ ! -f /data/widgets.json ] && [ -f /seed-data/widgets.json ]; then cp -n /seed-data/widgets.json /data/widgets.json; fi; npm install && node server.js"
+    # one-time migration from legacy calvybots_api_data → launchpad_api_data when needed
+    command: sh -c "mkdir -p /data; if [ ! -f /data/widgets.json ]; then if [ -f /legacy-data/widgets.json ]; then cp -n /legacy-data/widgets.json /data/widgets.json; fi; if [ ! -f /data/widgets.json ] && [ -f /seed-data/widgets.json ]; then cp -n /seed-data/widgets.json /data/widgets.json; fi; fi; npm install && node server.js"
     volumes:
       - /mnt/data/web_app/api:/app
       - /mnt/data/web_app/data:/seed-data:ro
-      - calvybots_api_data:/data
+      - calvybots_api_data:/legacy-data:ro
+      - launchpad_api_data:/data
       - /mnt/data/web_app/data/config.json:/data/config.json:ro
     expose:
       - "3000"
@@ -30,3 +32,4 @@ services:
 
 volumes:
   calvybots_api_data:
+  launchpad_api_data:

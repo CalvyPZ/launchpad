@@ -955,3 +955,45 @@ docker compose logs --tail=40 api
 1. Picker opens directly under the clicked color bar in static and scrolled states.
 2. Open menu remains vertically stable while dashboard/list scrolling.
 3. Outside-click and keyboard/Escape close paths still close correctly.
+
+## 2026-05-13 ? Frontend/Backend Cleanup: calvybots ? Launchpad
+
+**Status:** Planned, delegated.
+
+**Priority:** P1 (compatibility-safe naming normalization + cleanup).
+
+**Client scope:** full cleanup audit across runtime, docs, and process artifacts:
+- safe localStorage rename/migration strategy from `calvybots_*` to `launchpad_*`
+- unused-script/function reconciliation
+- documentation cleanup in team/developer and process docs
+- backend naming alignment where safe
+- QA pass/fail with explicit no-regression checks
+
+**Current assignment:** `team/assignments-cleanup-calvybots-launchpad.md`
+
+**Primary files:** `js/store.js`, `js/site-diagnostics.js`, `js/app.js`, `js/widgets/search.js`, `js/widgets/bookmarks.js`, `api/package.json`, `docker-compose.yml`, `sw.js`, `team/style-guide.md`, `data/schema.md`, `tests/*`.
+
+**Execution notes:**
+
+- Preserve backward compatibility on first pass; do not remove legacy `calvybots_*` persistence without migration proof.
+- Keep PWA cache and `/api/` exclusions unchanged unless explicitly revalidated.
+- If backend renames introduce persistence-risk (e.g. API data volume), pair with documented migration path or keep legacy artifact with compatibility alias.
+- Route QA through the existing checklists and request a new verdict in `team/qa-complete-v4.md`.
+
+**Team Lead execution status:**
+
+- **Frontend:** assigned to frontend-senior-dev via Team Lead delegation.
+- **Backend:** assigned to backend-senior-dev via Team Lead delegation.
+- **QA:** assigned to qa-engineer after implementation.
+- **Commit/rebase:** blocked until QA signoff and final Lead review.
+
+## QA outcome (cleanup track)
+
+**Verdict:** Pass with notes (`qa-engineer`).
+
+**Findings (non-blocking):**
+- No blocking regressions in cleanup namespace migration paths.
+- Medium residual risk: legacy dormant widget rows (`bookmarks`/`search`/`sysinfo`) in persisted layouts can surface as inert rows with the current renderer set; to be documented/handled explicitly.
+- Low risk: dormant bookmark path uses `innerHTML` with user-influenced label/icon values; security hardening can be deferred while dormant.
+
+**Sign-off recommendation:** static cycle is safe to proceed to commit/rebase, with interactive follow-up checks for migration matrix and legacy-layout behavior remaining.

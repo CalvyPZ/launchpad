@@ -70,10 +70,10 @@
 
 ## 4. Persistence and migration
 
-- [ ] `calvybots_widgets` key exists in localStorage after first load.
+- [ ] `launchpad_widgets` key exists in localStorage after first load (or migrates from legacy `calvybots_widgets` on first launch).
 - [ ] Layout and widget state survive a hard page reload.
-- [ ] Legacy `calvybots_notes` key (if present) is migrated into the first Notes widget row and removed.
-- [ ] Legacy `calvybots_todo` key (if present) is migrated into the first To-Do widget row and removed.
+- [ ] Legacy `calvybots_notes` key (if present) is migrated into the first Notes widget row.
+- [ ] Legacy `calvybots_todo` key (if present) is migrated into the first To-Do widget row.
 - [ ] If no Notes/To-Do widget exists at migration time, legacy keys are left intact (not lost). **[Interactive]**
 - [ ] Adding a new widget after migration triggers migration check (new instance gets clean state, not stale legacy). **[Interactive]**
 

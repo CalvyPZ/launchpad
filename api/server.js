@@ -591,7 +591,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[api] CalvyBots API listening on port ${PORT}`);
+  console.log(`[api] Launchpad API listening on port ${PORT}`);
 });
 
 void ensureWidgetsStorageAccessible();

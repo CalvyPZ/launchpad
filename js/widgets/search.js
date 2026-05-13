@@ -1,4 +1,5 @@
-﻿const SEARCH_ENGINE_KEY = "calvybots_search_engine";
+﻿const SEARCH_ENGINE_KEY = "launchpad_search_engine";
+const SEARCH_ENGINE_KEY_LEGACY = "calvybots_search_engine";
 
 const ENGINES = {
   google: "https://www.google.com/search?q=",
@@ -7,12 +8,24 @@ const ENGINES = {
 };
 
 function loadEngine() {
-  const saved = localStorage.getItem(SEARCH_ENGINE_KEY);
+  const readFromStorage = (key) => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const saved = readFromStorage(SEARCH_ENGINE_KEY) || readFromStorage(SEARCH_ENGINE_KEY_LEGACY);
   return ENGINES[saved] ? saved : "google";
 }
 
 function saveEngine(value) {
-  localStorage.setItem(SEARCH_ENGINE_KEY, value);
+  try {
+    localStorage.setItem(SEARCH_ENGINE_KEY, value);
+    localStorage.setItem(SEARCH_ENGINE_KEY_LEGACY, value);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function render(container) {

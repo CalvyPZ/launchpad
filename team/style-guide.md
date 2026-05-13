@@ -85,7 +85,7 @@
 
 - **Mechanism:** A horizontal **track** (`.pages-track`, `width: 300%`) holds three **panels** (`.page-panel`, `width: 33.333%` each) inside a clipping **viewport** (`.pages-viewport`, `overflow: hidden`). Switching pages toggles a modifier class: **Home** → `transform: translateX(0)`; **Tools** → `transform: translateX(-33.333333%)`; **Debug** → `transform: translateX(-66.666667%)` (one panel per viewport width).
 - **Motion:** `320ms` `cubic-bezier(0.4, 0, 0.2, 1)` on `transform` only — calm, not intrusive; no full document navigation or reload.
-- **State:** Page choice is client-side only (`currentPage` on the Alpine root); each page owns its widget list and separate `localStorage` keys (`calvybots_widgets`, `calvybots_tools_widgets`, `calvybots_tools_landing_widgets`).
+- **State:** Page choice is client-side only (`currentPage` on the Alpine root); each page owns its widget list and separate canonical `localStorage` keys (`launchpad_widgets`, `launchpad_tools_widgets`, `launchpad_tools_landing_widgets`) with transparent fallback to legacy `calvybots_*` keys during migration.
 
 ## Component patterns
 
@@ -114,7 +114,7 @@
 ### Server sync (widgets)
 
 - Widget layout and content sync to `/api/widgets` in the background; there is **no** header strip or other in-UI sync status.
-- The app still persists to `calvybots_widgets` (and tools keys) locally; failures to reach the server are logged to the console (`console.error`), not shown as app chrome.
+- The app persists to `launchpad_*` keys locally and reads from legacy `calvybots_*` keys when no canonical payload exists; failures to reach the server are logged to the console (`console.error`), not shown as app chrome.
 
 ## Motion
 

@@ -1,7 +1,13 @@
-const WIDGETS_KEY = "calvybots_widgets";
+const WIDGETS_KEY = "launchpad_widgets";
+/** Legacy key fallback for migration from historical user data. */
+const WIDGETS_KEY_LEGACY = "calvybots_widgets";
 /** Tools page widget rows — same row shape as home; types are tools-specific (e.g. `placeholder`). */
-const TOOLS_WIDGETS_KEY = "calvybots_tools_widgets";
-const TITLE_KEY = "calvybots_title";
+const TOOLS_WIDGETS_KEY = "launchpad_tools_widgets";
+/** Legacy tools key fallback for migration from historical user data. */
+const TOOLS_WIDGETS_KEY_LEGACY = "calvybots_tools_widgets";
+const TITLE_KEY = "launchpad_title";
+/** Legacy title fallback for migration from historical user data. */
+const TITLE_KEY_LEGACY = "calvybots_title";
 /** Legacy single-blob keys — migrated once into first matching widget; then removed. */
 const LEGACY_NOTES_KEY = "calvybots_notes";
 const LEGACY_TODO_KEY = "calvybots_todo";
@@ -70,7 +76,9 @@ const TOOLS_WIDGET_ID_STATUS = "widget-tools-status";
 const TOOLS_WIDGET_ID_LOG = "widget-tools-log";
 const TOOLS_LEGACY_PLACEHOLDER_ID = "widget-tools-placeholder";
 const TOOLS_TAB_PLACEHOLDER_ID = "widget-tools-tab-placeholder";
-const TOOLS_LANDING_WIDGETS_KEY = "calvybots_tools_landing_widgets";
+const TOOLS_LANDING_WIDGETS_KEY = "launchpad_tools_landing_widgets";
+/** Legacy tools tab key fallback for migration from historical user data. */
+const TOOLS_LANDING_WIDGETS_KEY_LEGACY = "calvybots_tools_landing_widgets";
 const DEFAULT_TOOLS_WIDGETS = [
   { id: TOOLS_WIDGET_ID_STATUS, type: "status-tools", position: 0 },
   { id: TOOLS_WIDGET_ID_LOG, type: "log-tools", position: 1 },
@@ -79,6 +87,81 @@ const DEFAULT_TOOLS_TAB_WIDGETS = [
   { id: TOOLS_TAB_PLACEHOLDER_ID, type: "placeholder", position: 0 },
 ];
 const TOOL_WIDGET_TYPES = new Set(["status-tools", "log-tools", "placeholder"]);
+
+function readStorageValue(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageValue(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStorageValue(key) {
+  try {
+    localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseJson(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function loadJsonFromStorage(primaryKey, legacyKey) {
+  const primaryRaw = readStorageValue(primaryKey);
+  const primaryPayload = parseJson(primaryRaw);
+  if (primaryRaw != null && primaryPayload != null) {
+    return { payload: primaryPayload, source: primaryKey };
+  }
+  if (legacyKey == null) {
+    return null;
+  }
+  const legacyRaw = readStorageValue(legacyKey);
+  const legacyPayload = parseJson(legacyRaw);
+  if (legacyRaw != null && legacyPayload != null) {
+    return { payload: legacyPayload, source: legacyKey };
+  }
+  return null;
+}
+
+function saveJsonToStorage(primaryKey, legacyKey, payload) {
+  const raw = typeof payload === "string" ? payload : JSON.stringify(payload);
+  writeStorageValue(primaryKey, raw);
+  if (legacyKey && legacyKey !== primaryKey) {
+    writeStorageValue(legacyKey, raw);
+  }
+}
+
+function readStringFromStorage(primaryKey, legacyKey) {
+  const primaryRaw = readStorageValue(primaryKey);
+  if (primaryRaw != null) return primaryRaw;
+  if (legacyKey == null) return null;
+  return readStorageValue(legacyKey);
+}
+
+function saveStringToStorage(primaryKey, legacyKey, value) {
+  const safeValue = String(value);
+  writeStorageValue(primaryKey, safeValue);
+  if (legacyKey && legacyKey !== primaryKey) {
+    writeStorageValue(legacyKey, safeValue);
+  }
+}
 
 export function defaultNotesState() {
   return { markdown: "", viewMode: "split" };
@@ -253,19 +336,8 @@ function mergeTodoState(raw) {
 export function migrateLegacyIfNeeded(widgets) {
   if (!Array.isArray(widgets) || widgets.length === 0) return widgets;
 
-  let notesLegacy = null;
-  let todoLegacy = null;
-  try {
-    notesLegacy = localStorage.getItem(LEGACY_NOTES_KEY);
-  } catch {
-    notesLegacy = null;
-  }
-  try {
-    const t = localStorage.getItem(LEGACY_TODO_KEY);
-    todoLegacy = t;
-  } catch {
-    todoLegacy = null;
-  }
+  const notesLegacy = readStorageValue(LEGACY_NOTES_KEY);
+  const todoLegacy = readStorageValue(LEGACY_TODO_KEY);
 
   const next = widgets.map((w) => ({ ...w }));
   let changed = false;
@@ -279,11 +351,7 @@ export function migrateLegacyIfNeeded(widgets) {
         notesState: { ...prev, markdown: String(notesLegacy) },
       };
       changed = true;
-      try {
-        localStorage.removeItem(LEGACY_NOTES_KEY);
-      } catch {
-        /* ignore */
-      }
+      removeStorageValue(LEGACY_NOTES_KEY);
     }
   }
 
@@ -310,11 +378,7 @@ export function migrateLegacyIfNeeded(widgets) {
         todoState: { ...prev, tasks: tasks.length ? tasks : prev.tasks },
       };
       changed = true;
-      try {
-        localStorage.removeItem(LEGACY_TODO_KEY);
-      } catch {
-        /* ignore */
-      }
+      removeStorageValue(LEGACY_TODO_KEY);
     }
   }
 
@@ -494,12 +558,12 @@ export function loadWidgets() {
 export function loadWidgetsDocument() {
   try {
     const fallback = normaliseWidgetRows(normalise(null));
-    const stored = localStorage.getItem(WIDGETS_KEY);
+    const stored = loadJsonFromStorage(WIDGETS_KEY, WIDGETS_KEY_LEGACY);
     if (!stored) {
       return { widgets: fallback, updatedAt: null, syncStatus: SYNC_STATUS_UNKNOWN };
     }
 
-    const parsed = JSON.parse(stored);
+    const parsed = stored.payload;
     const payload = coerceWidgetsPayload(parsed);
     return {
       widgets: normaliseWidgetRows(payload.widgetsRaw),
@@ -522,14 +586,11 @@ export function saveWidgets(widgets, options = {}) {
      so a cold load does not stamp defaults as "newer than server" and overwrite remote state on sync. */
   const updatedAt =
     "updatedAt" in options ? parseUpdatedAt(options.updatedAt) : new Date().toISOString();
-  localStorage.setItem(
-    WIDGETS_KEY,
-    JSON.stringify({
-      version: WIDGETS_DOCUMENT_VERSION,
-      updatedAt,
-      widgets: payload,
-    })
-  );
+  saveJsonToStorage(WIDGETS_KEY, WIDGETS_KEY_LEGACY, {
+    version: WIDGETS_DOCUMENT_VERSION,
+    updatedAt,
+    widgets: payload,
+  });
   return updatedAt;
 }
 
@@ -558,13 +619,13 @@ export function loadWidgetPayloadFromApi(raw) {
 
 export function loadToolsWidgets() {
   try {
-    const stored = localStorage.getItem(TOOLS_WIDGETS_KEY);
+    const stored = loadJsonFromStorage(TOOLS_WIDGETS_KEY, TOOLS_WIDGETS_KEY_LEGACY);
     if (!stored) {
       const fresh = normaliseToolsRows(null);
       evaluateAllTodoResets(fresh);
       return fresh;
     }
-    const parsed = JSON.parse(stored);
+    const parsed = stored.payload;
     const rawTools = Array.isArray(parsed)
       ? parsed
       : Array.isArray(parsed?.toolsWidgets)
@@ -584,12 +645,15 @@ export function loadToolsWidgets() {
 
 export function loadToolsLandingWidgets() {
   try {
-    const stored = localStorage.getItem(TOOLS_LANDING_WIDGETS_KEY);
+    const stored = loadJsonFromStorage(
+      TOOLS_LANDING_WIDGETS_KEY,
+      TOOLS_LANDING_WIDGETS_KEY_LEGACY
+    );
     if (!stored) {
       return normaliseToolsLandingRows(null);
     }
 
-    const parsed = JSON.parse(stored);
+    const parsed = stored.payload;
     const rawToolsLanding = Array.isArray(parsed)
       ? parsed
       : Array.isArray(parsed?.toolsLandingWidgets)
@@ -627,7 +691,7 @@ export function saveToolsWidgets(widgets) {
       return row;
     })
     .sort((a, b) => a.position - b.position);
-  localStorage.setItem(TOOLS_WIDGETS_KEY, JSON.stringify(payload));
+  saveJsonToStorage(TOOLS_WIDGETS_KEY, TOOLS_WIDGETS_KEY_LEGACY, payload);
 }
 
 export function saveToolsLandingWidgets(widgets) {
@@ -651,7 +715,7 @@ export function saveToolsLandingWidgets(widgets) {
       height: row.height == null || Number.isNaN(row.height) ? null : row.height,
     }))
     .sort((a, b) => a.position - b.position);
-  localStorage.setItem(TOOLS_LANDING_WIDGETS_KEY, JSON.stringify(payload));
+  saveJsonToStorage(TOOLS_LANDING_WIDGETS_KEY, TOOLS_LANDING_WIDGETS_KEY_LEGACY, payload);
 }
 
 const DEFAULT_SITE_TITLE = "Calvy Launchpad";
@@ -670,7 +734,7 @@ function migrateLegacySiteTitle(stored) {
 }
 
 export function loadSiteTitle() {
-  const stored = localStorage.getItem(TITLE_KEY);
+  const stored = readStringFromStorage(TITLE_KEY, TITLE_KEY_LEGACY);
   if (!stored || !stored.trim()) return DEFAULT_SITE_TITLE;
   const migrated = migrateLegacySiteTitle(stored);
   if (migrated !== stored.trim()) {
@@ -680,5 +744,5 @@ export function loadSiteTitle() {
 }
 
 export function saveSiteTitle(value) {
-  localStorage.setItem(TITLE_KEY, String(value || "").trim() || DEFAULT_SITE_TITLE);
+  saveStringToStorage(TITLE_KEY, TITLE_KEY_LEGACY, String(value || "").trim() || DEFAULT_SITE_TITLE);
 }
