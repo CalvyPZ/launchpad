@@ -157,13 +157,41 @@ export function render(container, widgetRow, dashboard) {
       current.targetDate === state.targetDate;
     if (!same) row.fortnightState = state;
 
-    if (!dashboard || typeof dashboard.persistToolsWidgets !== "function") return;
-    if (Array.isArray(dashboard.toolsWidgets) && dashboard.toolsWidgets.some((item) => item.id === row.id)) {
-      dashboard.persistToolsWidgets();
+    if (!dashboard) return;
+
+    const persistLanding =
+      typeof dashboard.persistToolsLandingWidgets === "function"
+        ? () => dashboard.persistToolsLandingWidgets()
+        : null;
+    const persistDebugTools =
+      typeof dashboard.persistToolsWidgets === "function"
+        ? () => dashboard.persistToolsWidgets()
+        : null;
+    const persistHome =
+      typeof dashboard.persistWidgets === "function" ? () => dashboard.persistWidgets() : null;
+
+    if (
+      persistLanding &&
+      Array.isArray(dashboard.toolsLandingWidgets) &&
+      dashboard.toolsLandingWidgets.some((item) => item.id === row.id)
+    ) {
+      persistLanding();
       return;
     }
-    if (Array.isArray(dashboard.widgets) && dashboard.widgets.some((item) => item.id === row.id)) {
-      dashboard.persistWidgets();
+    if (
+      persistDebugTools &&
+      Array.isArray(dashboard.toolsWidgets) &&
+      dashboard.toolsWidgets.some((item) => item.id === row.id)
+    ) {
+      persistDebugTools();
+      return;
+    }
+    if (
+      persistHome &&
+      Array.isArray(dashboard.widgets) &&
+      dashboard.widgets.some((item) => item.id === row.id)
+    ) {
+      persistHome();
     }
   };
 

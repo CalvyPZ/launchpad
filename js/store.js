@@ -1,7 +1,7 @@
 const WIDGETS_KEY = "launchpad_widgets";
 /** Legacy key fallback for migration from historical user data. */
 const WIDGETS_KEY_LEGACY = "calvybots_widgets";
-/** Tools page widget rows — same row shape as home; types are tools-specific (e.g. `placeholder`). */
+/** Debug grid widget rows (`launchpad_tools_widgets`); types: `status-tools`, `log-tools`, legacy `placeholder` / `fortnight`. */
 const TOOLS_WIDGETS_KEY = "launchpad_tools_widgets";
 /** Legacy tools key fallback for migration from historical user data. */
 const TOOLS_WIDGETS_KEY_LEGACY = "calvybots_tools_widgets";
@@ -75,7 +75,11 @@ const DEFAULT_WIDGETS = [
 const TOOLS_WIDGET_ID_STATUS = "widget-tools-status";
 const TOOLS_WIDGET_ID_LOG = "widget-tools-log";
 const TOOLS_LEGACY_PLACEHOLDER_ID = "widget-tools-placeholder";
+/** Legacy default id for Tools tab placeholder row — migrates to `TOOLS_TAB_FORTNIGHT_ID` on load. */
 const TOOLS_TAB_PLACEHOLDER_ID = "widget-tools-tab-placeholder";
+/** Default Tools tab (non-Debug) primary widget id */
+const TOOLS_TAB_FORTNIGHT_ID = "widget-tools-fortnight";
+/** Tools landing panel (`launchpad_tools_landing_widgets`); primary type `fortnight` (legacy `placeholder` migrates on load). */
 const TOOLS_LANDING_WIDGETS_KEY = "launchpad_tools_landing_widgets";
 /** Legacy tools tab key fallback for migration from historical user data. */
 const TOOLS_LANDING_WIDGETS_KEY_LEGACY = "calvybots_tools_landing_widgets";
@@ -84,7 +88,7 @@ const DEFAULT_TOOLS_WIDGETS = [
   { id: TOOLS_WIDGET_ID_LOG, type: "log-tools", position: 1 },
 ];
 const DEFAULT_TOOLS_TAB_WIDGETS = [
-  { id: TOOLS_TAB_PLACEHOLDER_ID, type: "placeholder", position: 0 },
+  { id: TOOLS_TAB_FORTNIGHT_ID, type: "fortnight", position: 0 },
 ];
 const TOOL_WIDGET_TYPES = new Set(["status-tools", "log-tools", "placeholder", "fortnight"]);
 
@@ -574,20 +578,33 @@ export function normaliseToolsRows(rawItems) {
 
 function normaliseToolsLandingRows(rawItems) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
-    return DEFAULT_TOOLS_TAB_WIDGETS.map((w, i) => ({
-      ...w,
-      position: i,
-      visible: true,
-      minWidth: DEFAULT_MIN_WIDTH,
-      minHeight: DEFAULT_MIN_HEIGHT,
-    }));
+    return DEFAULT_TOOLS_TAB_WIDGETS.map((w, i) => {
+      const row = {
+        ...w,
+        position: i,
+        visible: true,
+        minWidth: DEFAULT_MIN_WIDTH,
+        minHeight: DEFAULT_MIN_HEIGHT,
+        title: "",
+        width: null,
+        height: null,
+      };
+      if (w.type === "fortnight") {
+        return { ...row, fortnightState: mergeFortnightState({}) };
+      }
+      return row;
+    });
   }
 
   const valid = rawItems
     .map((item, index) => {
-      const type = typeof item?.type === "string" ? item.type : null;
-      if (type !== "placeholder") return null;
-      const id = String(item.id || `tools-tab-widget-${Date.now()}-${index}`);
+      let type = typeof item?.type === "string" ? item.type : null;
+      if (type === "placeholder") type = "fortnight";
+      if (type !== "fortnight") return null;
+      let id = String(item.id || `tools-tab-widget-${Date.now()}-${index}`);
+      if (id === TOOLS_TAB_PLACEHOLDER_ID) {
+        id = TOOLS_TAB_FORTNIGHT_ID;
+      }
       const position = clampToNumber(item.position, index);
       const visible = item.visible !== false;
       const title = typeof item.title === "string" ? item.title : "";
@@ -597,7 +614,7 @@ function normaliseToolsLandingRows(rawItems) {
       const height = item.height == null || item.height === "" ? null : clampToNumber(item.height, NaN);
       return {
         id,
-        type,
+        type: "fortnight",
         position,
         visible,
         title,
@@ -605,6 +622,7 @@ function normaliseToolsLandingRows(rawItems) {
         minHeight,
         width: width == null || Number.isNaN(width) ? null : width,
         height: height == null || Number.isNaN(height) ? null : height,
+        fortnightState: mergeFortnightState(item.fortnightState),
       };
     })
     .filter(Boolean)
@@ -766,24 +784,27 @@ export function saveToolsWidgets(widgets) {
 
 export function saveToolsLandingWidgets(widgets) {
   const payload = (widgets || [])
-    .map((widget, index) => ({
-      id: widget.id,
-      type: widget.type,
-      position: index,
-      visible: widget.visible !== false,
-      title: typeof widget.title === "string" ? widget.title : "",
-      minWidth: clampToNumber(widget.minWidth, DEFAULT_MIN_WIDTH),
-      minHeight: clampToNumber(widget.minHeight, DEFAULT_MIN_HEIGHT),
-      width:
-        widget.width == null || widget.width === "" ? null : clampToNumber(widget.width, NaN),
-      height:
-        widget.height == null || widget.height === "" ? null : clampToNumber(widget.height, NaN),
-    }))
-    .map((row) => ({
-      ...row,
-      width: row.width == null || Number.isNaN(row.width) ? null : row.width,
-      height: row.height == null || Number.isNaN(row.height) ? null : row.height,
-    }))
+    .map((widget, index) => {
+      const row = {
+        id: widget.id,
+        type: widget.type,
+        position: index,
+        visible: widget.visible !== false,
+        title: typeof widget.title === "string" ? widget.title : "",
+        minWidth: clampToNumber(widget.minWidth, DEFAULT_MIN_WIDTH),
+        minHeight: clampToNumber(widget.minHeight, DEFAULT_MIN_HEIGHT),
+        width:
+          widget.width == null || widget.width === "" ? null : clampToNumber(widget.width, NaN),
+        height:
+          widget.height == null || widget.height === "" ? null : clampToNumber(widget.height, NaN),
+      };
+      if (row.width != null && Number.isNaN(row.width)) row.width = null;
+      if (row.height != null && Number.isNaN(row.height)) row.height = null;
+      if (widget.type === "fortnight") {
+        row.fortnightState = mergeFortnightState(widget.fortnightState);
+      }
+      return row;
+    })
     .sort((a, b) => a.position - b.position);
   saveJsonToStorage(TOOLS_LANDING_WIDGETS_KEY, TOOLS_LANDING_WIDGETS_KEY_LEGACY, payload);
 }

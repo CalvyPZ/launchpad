@@ -110,18 +110,22 @@ const addWidgetChoices = [
   { type: "todo", label: "To-Do", icon: "✅" },
 ];
 
-const toolsWidgetTypes = ["status-tools", "log-tools", "placeholder", "fortnight"];
 const toolsWidgetFactories = {
   "status-tools": statusToolsWidget.render,
   "log-tools": logToolsWidget.render,
   placeholder: placeholderWidget.render,
   fortnight: fortnightToolsWidget.render,
 };
-const toolsWidgetTypeSet = new Set(toolsWidgetTypes);
-const toolsAddWidgetChoices = [
+/** Types the user may add from the Tools tab picker. */
+const toolsTabAddableTypeSet = new Set(["fortnight"]);
+const toolsTabAddWidgetChoices = [
+  { type: "fortnight", label: "Fortnight calculator", icon: "📆" },
+];
+/** Types the user may add from the Debug tab picker (diagnostics only). */
+const debugAddableTypeSet = new Set(["status-tools", "log-tools"]);
+const debugAddWidgetChoices = [
   { type: "status-tools", label: "Status", icon: "📡" },
   { type: "log-tools", label: "Log", icon: "📋" },
-  { type: "fortnight", label: "Fortnight", icon: "📆" },
 ];
 
 const widgetLabels = {
@@ -129,7 +133,7 @@ const widgetLabels = {
   todo: "To-Do",
   "status-tools": "Status",
   "log-tools": "Log",
-  fortnight: "Fortnight",
+  fortnight: "Fortnight calculator",
   placeholder: "Placeholder",
 };
 
@@ -635,6 +639,7 @@ document.addEventListener("alpine:init", () => {
         updatedAt: this._widgetsUpdatedAt,
       });
       saveToolsWidgets(this.toolsWidgets);
+      saveToolsLandingWidgets(this.toolsLandingWidgets);
       /* Keep outbound queue real: persistWidgetsDeferredSync sets this when the user/tooling dirties state,
          or a debounced PUT is still scheduled. Never force-sync on exit — forcing sync while the initial
          GET reconcile is still in flight can PUT default/tentative rows and wipe the server's last good blob. */
@@ -1162,8 +1167,8 @@ document.addEventListener("alpine:init", () => {
     },
 
     getAddWidgetPickerOptions() {
-      if (this.currentPage === "debug") return toolsAddWidgetChoices;
-      if (this.currentPage === "tools") return [];
+      if (this.currentPage === "tools") return toolsTabAddWidgetChoices;
+      if (this.currentPage === "debug") return debugAddWidgetChoices;
       return this.addWidgetChoices || [];
     },
 
@@ -1576,7 +1581,7 @@ document.addEventListener("alpine:init", () => {
       if (!this.editMode) return false;
       let added = false;
       if (this.currentPage === "debug") {
-        if (!toolsWidgetTypeSet.has(type)) return false;
+        if (!debugAddableTypeSet.has(type)) return false;
         const nextPosition = this.toolsWidgets.length;
         const next = {
           id: makeWidgetId(type),
@@ -1589,13 +1594,29 @@ document.addEventListener("alpine:init", () => {
           width: null,
           height: null,
         };
-        if (type === "fortnight") next.fortnightState = defaultFortnightState();
         this.toolsWidgets = [...this.toolsWidgets, next];
         this.persistToolsWidgets();
         this.renderPageWidgets("debug");
         added = true;
       } else if (this.currentPage === "tools") {
-        return false;
+        if (!toolsTabAddableTypeSet.has(type)) return false;
+        const nextPosition = this.toolsLandingWidgets.length;
+        const next = {
+          id: makeWidgetId(type),
+          type: "fortnight",
+          position: nextPosition,
+          visible: true,
+          title: "",
+          minWidth: 250,
+          minHeight: 178,
+          width: null,
+          height: null,
+          fortnightState: defaultFortnightState(),
+        };
+        this.toolsLandingWidgets = [...this.toolsLandingWidgets, next];
+        this.persistToolsLandingWidgets();
+        this.renderPageWidgets("tools");
+        added = true;
       } else {
         if (!widgetTypeSet.has(type)) return false;
         const nextPosition = this.widgets.length;
@@ -1612,7 +1633,6 @@ document.addEventListener("alpine:init", () => {
         };
         if (type === "notes") next.notesState = defaultNotesState();
         if (type === "todo") next.todoState = defaultTodoState();
-        if (type === "fortnight") next.fortnightState = defaultFortnightState();
         this.widgets = migrateLegacyIfNeeded([...this.widgets, next]);
         this.persistWidgets();
         this.renderPageWidgets("home");

@@ -2,6 +2,20 @@
 
 Date: 2026-05-13
 
+### Client direction ? Tools tab Fortnight calculator (2026-05-13)
+
+**Status:** Delegated to Frontend Dev.
+
+**Priority:** P1 (default Tools landing + add-widget parity).
+
+**Scope:** Replace Tools tab placeholder default with the Fortnight calculator widget; enable Add Widget on the Tools tab for Fortnight only; treat Fortnight as a regular Tools utility (not legacy/Debug-only). Persist `fortnightState` on the Tools landing store path; migrate `placeholder` rows to `fortnight`; split Add Widget pickers so Tools shows Fortnight and Debug shows Status + Log only (no Fortnight on Debug).
+
+**Files (target):** `js/store.js`, `js/app.js`; `team/style-guide.md` only if picker labels or documented widget behaviour change.
+
+**Acceptance:** Fresh/cleared tools landing shows Fortnight, not placeholder; existing placeholder users migrate to Fortnight after load/persist; Tools edit mode Add Widget adds Fortnight and state survives refresh; Debug Add Widget no longer lists Fortnight; no regression for home widgets or debug status/log.
+
+**Next:** Invoke `qa-engineer` for interactive Tools + Debug pass after Frontend delivers.
+
 ### Client direction ? Remove dormant widget types entirely (2026-05-13)
 
 **Status:** Delegated (Frontend + Backend parallel); QA after landing.

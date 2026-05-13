@@ -110,6 +110,7 @@
 - Focus: visible `:focus-visible` and consistent contrast.
 - Touch: minimum `42px` controls for mobile.
 - Add-widget control now uses a keyboard-operable combobox/listbox pattern: open/close with Enter/Space/Arrow keys and close/return focus on Escape.
+- **Add Widget by page:** **Home** — Sticky Notes + To-Do; **Tools** — Fortnight calculator only (`launchpad_tools_landing_widgets`); **Debug** — Status + Log only (diagnostics). Existing **Fortnight** rows saved on the Debug grid still render for backward compatibility but are not offered in the Debug add picker.
 
 ### Server sync (widgets)
 
@@ -194,7 +195,7 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 ## Tools diagnostics widgets (Status + Log)
 
 - Diagnostics is owned by `js/site-diagnostics.js` with a local subscriber API (`subscribeLogs` / `subscribeProbes`, each returning a disposer) and a ring-buffer log capped at 500 entries.
-- Tools diagnostics widgets run on the tools panel only; shell still renders widget titles.
+- Status and Log widgets render on the **Debug** page grid (`#debug-grid`, `launchpad_tools_widgets`); shell still renders widget titles.
 - Probe outcomes are grouped by status (`ok`, `warn`, `crit`) and surfaced in Status rows:
   - Healthy: `#22c55e` (`emerald`) + `text-emerald-400`.
   - Warning: `#f59e0b` (`amber`) + `text-amber-400`.
@@ -206,9 +207,11 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 - Probe writes and console capture are append-only; manual refresh and automatic visibility/poll refresh are available for Status.
 - **Widget server sync** — two extra Status rows (merged after static probes): **Widgets GET (retrieve)** for the initial `/api/widgets` load, and **Widgets PUT (push)** for live outbound state (idle / debounced / in flight / offline queue / last failure). `js/app.js` calls `reportWidgetSyncRetrieve`, `reportWidgetSyncPushFromDashboard`, and `reportWidgetSyncPushEvent`; structured **info** log lines mark GET/PUT milestones, while existing `console.error` / `console.warn` on sync failures still flow through the Log via console hooks.
 
-## Tools debug widget (Fortnight calculator)
+## Fortnight calculator (Tools tab)
 
-- Added on Debug page tools track (`toolsWidgets`) via `js/widgets/fortnight-tools.js`; widget rows keep per-instance settings in `widgetRow.fortnightState`.
+- Primary home is the **Tools** landing grid (`#tools-grid`, `launchpad_tools_landing_widgets`): default layout is one Fortnight row (`widget-tools-fortnight`); legacy `placeholder` rows migrate to `fortnight` on load, and the former default placeholder id (`widget-tools-tab-placeholder`) maps to the canonical Fortnight id when present.
+- Implementation: `js/widgets/fortnight-tools.js`; per-instance settings live in `widgetRow.fortnightState` and persist with the row (including from **Tools** edit mode and `saveToolsLandingWidgets()` in `js/store.js`).
+- **Debug grid:** older saves may still contain `fortnight` on `launchpad_tools_widgets`; those rows continue to render, but **Add Widget** on Debug only offers Status and Log.
 - Inputs in the widget: FN start date, line number at FN start, rotate-from, rotate-to, and target date.
 - Output sentence format is fixed: `On {Date} you will be on line {line number}`.
 - Line progression: count Sundays after FN start through target date, then advance by +1 every second Sunday (`Math.floor(sundayCount / 2)`), wrapping to the configured range.
