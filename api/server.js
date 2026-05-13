@@ -24,6 +24,8 @@ const PORT = Number(process.env.PORT) || 3000;
 const CONFIG_PATH = path.resolve(__dirname, '..', 'data', 'config.json');
 const WIDGETS_PATH = path.resolve(__dirname, '..', 'data', 'widgets.json');
 const fsp = fs.promises;
+
+console.log('[api] WIDGETS_PATH resolved to:', WIDGETS_PATH);
 const startTime = Date.now();
 
 const WIDGETS_SCHEMA_VERSION = 2;
@@ -328,6 +330,10 @@ async function writeWidgetsAtomic(document) {
   try {
     await fsp.writeFile(tmpPath, payload, 'utf8');
     await fsp.rename(tmpPath, WIDGETS_PATH);
+    console.log('[api] writeWidgetsAtomic OK, wrote', WIDGETS_PATH);
+  } catch (error) {
+    console.error('[api] writeWidgetsAtomic FAILED:', error);
+    throw error;
   } finally {
     await fsp.unlink(tmpPath).catch(() => undefined);
   }
@@ -411,6 +417,7 @@ function handleConfig(res) {
 async function handleGetWidgets(res) {
   try {
     const doc = await readWidgetsFromDisk();
+    console.log('[api] GET /api/widgets → updatedAt:', doc.updatedAt);
     sendJson(res, 200, doc);
   } catch (error) {
     console.error('[api] Failed to read widgets:', error);
@@ -453,6 +460,7 @@ async function handlePutWidgets(req, res) {
       return;
     }
 
+    console.log('[api] PUT /api/widgets → persisting, payload updatedAt:', normalized.value.updatedAt);
     await queueWidgetPersist(normalized.value);
     sendJson(res, 200, normalized.value);
   } catch (error) {
