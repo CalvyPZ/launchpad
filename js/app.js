@@ -325,8 +325,8 @@ document.addEventListener("alpine:init", () => {
         shell.appendChild(dragHandle);
 
         if (this.editMode) {
-          dragHandle.addEventListener("pointerdown", this.onWidgetPointerDown.bind(this));
-          dragHandle.addEventListener("pointermove", this.onWidgetPointerMove.bind(this));
+          dragHandle.addEventListener("pointerdown", this.onWidgetPointerDown.bind(this), { passive: false });
+          dragHandle.addEventListener("pointermove", this.onWidgetPointerMove.bind(this), { passive: false });
           dragHandle.addEventListener("pointerup", this.onWidgetPointerUp.bind(this));
           dragHandle.addEventListener("pointercancel", this.onWidgetPointerCancel.bind(this));
           dragHandle.addEventListener("lostpointercapture", this.onWidgetLostPointerCapture.bind(this));

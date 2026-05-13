@@ -723,8 +723,8 @@ export function render(container, context) {
 
       const taskHandle = taskElement.querySelector(".todo-item-handle");
       if (taskHandle) {
-        taskHandle.addEventListener("pointerdown", onTaskPointerDown);
-        taskHandle.addEventListener("pointermove", onTaskPointerMove);
+        taskHandle.addEventListener("pointerdown", onTaskPointerDown, { passive: false });
+        taskHandle.addEventListener("pointermove", onTaskPointerMove, { passive: false });
         taskHandle.addEventListener("pointerup", onTaskPointerUp);
         taskHandle.addEventListener("pointercancel", onTaskPointerCancel);
         taskHandle.addEventListener("lostpointercapture", onTaskLostPointerCapture);
