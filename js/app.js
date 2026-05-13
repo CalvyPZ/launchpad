@@ -192,6 +192,17 @@ document.addEventListener("alpine:init", () => {
     _widgetsSyncInFlight: false,
     _widgetsSyncAbort: null,
     _widgetsNeedSync: false,
+    _widgetsSyncDebugTicker: null,
+    _widgetSyncDebugNow: Date.now(),
+    _widgetsSyncDebounceStartedAt: null,
+    _widgetsSyncPushTimerStartedAt: null,
+    _widgetsLastSyncPullAt: null,
+    _widgetsLastSyncPushAt: null,
+    _widgetsLastPushOutcome: {
+      status: "never",
+      message: "No outbound attempt yet",
+      at: null,
+    },
     _widgetsUpdatedAt: null,
     _widgetsPollTimer: null,
     _widgetsPendingRemotePayload: null,
@@ -220,7 +231,7 @@ document.addEventListener("alpine:init", () => {
       saveToolsWidgets(this.toolsWidgets);
       const shouldSync = options.sync !== false;
       if (!shouldSync) {
-        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
+        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt });
         return;
       }
       this.persistWidgetsDeferredSync();
@@ -245,6 +256,9 @@ document.addEventListener("alpine:init", () => {
       };
       this._offlineHandler = () => {
         this.online = false;
+        if (this._widgetsNeedSync) {
+          this._setWidgetSyncPushOutcome("skipped", "Offline (retry on reconnect)");
+        }
         this._disarmWidgetsSyncPoller();
         this._disarmWidgetsSyncPushTimer();
         reportWidgetSyncPushFromDashboard(this);
@@ -259,6 +273,7 @@ document.addEventListener("alpine:init", () => {
       window.addEventListener("offline", this._offlineHandler);
       window.addEventListener("pagehide", this._pagehideHandler);
       window.addEventListener("beforeunload", this._beforeUnloadHandler);
+      this._startWidgetSyncDebugTicker();
       this.refreshClock();
 
       const localDocument = loadWidgetsDocument();
@@ -375,7 +390,9 @@ document.addEventListener("alpine:init", () => {
     _armWidgetsSyncPushTimer() {
       this._disarmWidgetsSyncPushTimer();
       if (document.visibilityState !== "visible" || !this.online) return;
+      this._widgetsSyncPushTimerStartedAt = Date.now();
       this._widgetsSyncPushTimer = window.setInterval(() => {
+        this._widgetsSyncPushTimerStartedAt = Date.now();
         if (!this._widgetsNeedSync) return;
         void this.syncToServer();
       }, WIDGET_SYNC_PUSH_MS);
@@ -393,6 +410,7 @@ document.addEventListener("alpine:init", () => {
         window.clearInterval(this._widgetsSyncPushTimer);
         this._widgetsSyncPushTimer = null;
       }
+      this._widgetsSyncPushTimerStartedAt = null;
     },
 
     _armTodoResetTicker() {
@@ -424,6 +442,121 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
+    _startWidgetSyncDebugTicker() {
+      if (this._widgetsSyncDebugTicker != null) return;
+      this._widgetSyncDebugNow = Date.now();
+      this._widgetsSyncDebugTicker = window.setInterval(() => {
+        this._widgetSyncDebugNow = Date.now();
+      }, 1000);
+    },
+
+    _stopWidgetSyncDebugTicker() {
+      if (this._widgetsSyncDebugTicker != null) {
+        window.clearInterval(this._widgetsSyncDebugTicker);
+        this._widgetsSyncDebugTicker = null;
+      }
+    },
+
+    _setWidgetSyncPushOutcome(status, message = "") {
+      this._widgetsLastPushOutcome = {
+        status,
+        message,
+        at: new Date().toISOString(),
+      };
+    },
+
+    _formatWidgetSyncTimestamp(value) {
+      if (!value) return "";
+      const d = new Date(value);
+      if (!Number.isFinite(d.getTime())) return String(value);
+      return d.toLocaleString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    },
+
+    _formatRemainingSeconds(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return "0s";
+      return `${Math.max(0, Math.ceil(ms / 1000))}s`;
+    },
+
+    _resolveWidgetSyncStatusLabel() {
+      if (this._widgetsSyncInFlight) return "uploading";
+      if (this._widgetsNeedSync) return this.online ? "pending" : "pending (offline)";
+      return "synced";
+    },
+
+    _resolveWidgetSyncNextPushCountdownLabel() {
+      const now = this._widgetSyncDebugNow || Date.now();
+      if (!this._widgetsNeedSync) return "idle";
+      if (this._widgetsSyncInFlight) return "uploading";
+      if (!this.online) return "no active retries (offline)";
+      if (this._widgetsSyncTimer && this._widgetsSyncDebounceStartedAt) {
+        const elapsed = Math.max(0, now - this._widgetsSyncDebounceStartedAt);
+        return `${this._formatRemainingSeconds(WIDGET_SYNC_DEBOUNCE_MS - elapsed)} until debounced PUT`;
+      }
+      if (this._widgetsSyncPushTimer && this._widgetsSyncPushTimerStartedAt) {
+        const elapsed = Math.max(0, now - this._widgetsSyncPushTimerStartedAt);
+        return `${this._formatRemainingSeconds(WIDGET_SYNC_PUSH_MS - elapsed)} until retry interval`;
+      }
+      return this.online ? "pending (no push timer)" : "pending (no retries)";
+    },
+
+    _resolveWidgetSyncLastTimestampLabel() {
+      const candidates = [];
+      if (this._widgetsLastSyncPullAt) candidates.push({ when: this._widgetsLastSyncPullAt, source: "GET" });
+      if (this._widgetsLastSyncPushAt) candidates.push({ when: this._widgetsLastSyncPushAt, source: "PUT" });
+      if (!candidates.length) return "No successful sync yet";
+
+      let latest = candidates[0];
+      for (let i = 1; i < candidates.length; i += 1) {
+        const next = candidates[i];
+        if (compareUpdatedAt(next.when, latest.when) > 0) latest = next;
+      }
+      return `${latest.source} ${this._formatWidgetSyncTimestamp(latest.when)}`;
+    },
+
+    _resolveWidgetSyncPushOutcomeLabel() {
+      const status = this._widgetsLastPushOutcome?.status || "none";
+      const message = (this._widgetsLastPushOutcome?.message || "").trim();
+      const at = this._formatWidgetSyncTimestamp(this._widgetsLastPushOutcome?.at);
+      const statusText = message ? `${status} — ${message}` : status;
+      return at ? `${statusText} (${at})` : statusText;
+    },
+
+    _resolveWidgetSyncRetrieveLabel() {
+      if (!this._initialServerSyncDone) {
+        return this._initialServerSyncInFlight
+          ? "bootstrap GET in progress"
+          : "bootstrap-only: initial GET pending";
+      }
+      return "bootstrap-only / not currently polling";
+    },
+
+    widgetSyncStripLastSyncLabel() {
+      return this._resolveWidgetSyncLastTimestampLabel();
+    },
+
+    widgetSyncStripSyncStateLabel() {
+      return this._resolveWidgetSyncStatusLabel();
+    },
+
+    widgetSyncStripNextCountdownLabel() {
+      return this._resolveWidgetSyncNextPushCountdownLabel();
+    },
+
+    widgetSyncStripPushOutcomeLabel() {
+      return this._resolveWidgetSyncPushOutcomeLabel();
+    },
+
+    widgetSyncStripRetrieveLabel() {
+      return this._resolveWidgetSyncRetrieveLabel();
+    },
+
     refreshClock() {
       const latest = nowClockText();
       this.clockTime = latest.clockTime;
@@ -440,11 +573,15 @@ document.addEventListener("alpine:init", () => {
       const updatedAt = saveWidgets(this.widgets, { updatedAt: new Date().toISOString() });
       this._widgetsUpdatedAt = updatedAt;
       this._widgetsNeedSync = true;
+      this._setWidgetSyncPushOutcome("queued", "debounced PUT queued");
       if (this._widgetsSyncTimer) {
         window.clearTimeout(this._widgetsSyncTimer);
+        this._widgetsSyncDebounceStartedAt = null;
       }
+      this._widgetsSyncDebounceStartedAt = Date.now();
       this._widgetsSyncTimer = window.setTimeout(() => {
         this._widgetsSyncTimer = null;
+        this._widgetsSyncDebounceStartedAt = null;
         void this.syncToServer();
       }, WIDGET_SYNC_DEBOUNCE_MS);
       reportWidgetSyncPushFromDashboard(this);
@@ -460,6 +597,7 @@ document.addEventListener("alpine:init", () => {
       if (this._widgetsSyncTimer != null) {
         window.clearTimeout(this._widgetsSyncTimer);
         this._widgetsSyncTimer = null;
+        this._widgetsSyncDebounceStartedAt = null;
       }
       this._disarmWidgetsSyncPoller();
       this._disarmWidgetsSyncPushTimer();
@@ -485,7 +623,7 @@ document.addEventListener("alpine:init", () => {
       if (doSync) {
         return this.persistWidgetsDeferredSync();
       }
-      saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
+      saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt });
     },
 
     _reconcilePayloadLocally(payload, trigger = "poll") {
@@ -587,6 +725,7 @@ document.addEventListener("alpine:init", () => {
 
         this._reconcilePayloadLocally(payload, trigger);
         this._applyPendingRemotePayload();
+        this._widgetsLastSyncPullAt = new Date().toISOString();
         const okDetail =
           typeof payload.updatedAt === "string" && payload.updatedAt.trim()
             ? `updatedAt ${payload.updatedAt}`
@@ -610,16 +749,21 @@ document.addEventListener("alpine:init", () => {
       const useKeepalive = options.keepalive === true;
       const keepaliveSource = options.source || "manual";
       if (!this.online) {
+        this._setWidgetSyncPushOutcome("skipped", "Offline (will retry when online)");
         reportWidgetSyncPushFromDashboard(this);
         return;
       }
 
       if (!this._widgetsNeedSync) {
+        this._setWidgetSyncPushOutcome("skipped", "No pending local changes");
         reportWidgetSyncPushFromDashboard(this);
         return;
       }
 
-      if (this._widgetsSyncInFlight) return;
+      if (this._widgetsSyncInFlight) {
+        this._setWidgetSyncPushOutcome("queued", "Upload already in flight");
+        return;
+      }
 
       const nextPayload = getWidgetPayloadForApi(this.widgets, {
         updatedAt: this._widgetsUpdatedAt,
@@ -628,6 +772,7 @@ document.addEventListener("alpine:init", () => {
       const serializedPayload = JSON.stringify(nextPayload);
       const syncAttemptedUpdatedAt = this._widgetsUpdatedAt;
       this._widgetsSyncInFlight = true;
+      this._setWidgetSyncPushOutcome("uploading", "PUT in progress");
       reportWidgetSyncPushFromDashboard(this);
       const controller = useKeepalive ? null : new AbortController();
       if (controller) {
@@ -650,6 +795,7 @@ document.addEventListener("alpine:init", () => {
         } catch (error) {
           if (error && error.name === "AbortError") {
             reportWidgetSyncPushEvent("aborted", "Request aborted", this);
+            this._setWidgetSyncPushOutcome("aborted", "Request aborted");
             return;
           }
           if (useKeepalive && typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
@@ -665,6 +811,7 @@ document.addEventListener("alpine:init", () => {
             if (beaconSent) {
               console.warn(`Widget sync: sendBeacon queued (no response); keeping _widgetsNeedSync for next online PUT (${keepaliveSource})`);
               reportWidgetSyncPushEvent("beacon_queued", keepaliveSource, this);
+              this._setWidgetSyncPushOutcome("queued", "Keepalive beacon queued");
               return;
             }
             if (useKeepalive) {
@@ -690,6 +837,7 @@ document.addEventListener("alpine:init", () => {
         if (!hadUnsentLocalChanges) {
           this._widgetsNeedSync = false;
         }
+        this._widgetsLastSyncPushAt = new Date().toISOString();
         const body = await response.json().catch(() => null);
         const serverPayload = body ? loadWidgetPayloadFromApi(body) || pickServerPayload(body) : null;
         if (serverPayload?.updatedAt && this._widgetsUpdatedAt === syncAttemptedUpdatedAt) {
@@ -699,11 +847,13 @@ document.addEventListener("alpine:init", () => {
           serverPayload?.updatedAt && typeof serverPayload.updatedAt === "string"
             ? `server updatedAt ${serverPayload.updatedAt}`
             : "PUT accepted";
+        this._setWidgetSyncPushOutcome("success", okDetail);
         reportWidgetSyncPushEvent("success", okDetail, this);
       } catch (error) {
         if (error && error.name === "AbortError") return;
         console.error("Widget sync save failed", error);
         const msg = error instanceof Error ? error.message : String(error);
+        this._setWidgetSyncPushOutcome("failed", msg);
         reportWidgetSyncPushEvent("fail", msg, this);
       } finally {
         this._widgetsSyncInFlight = false;
@@ -1411,6 +1561,9 @@ document.addEventListener("alpine:init", () => {
         window.clearTimeout(this._widgetsSyncTimer);
         this._widgetsSyncTimer = null;
       }
+      this._stopWidgetSyncDebugTicker();
+      this._widgetsSyncDebounceStartedAt = null;
+      this._widgetsSyncPushTimerStartedAt = null;
       if (this._widgetsSyncAbort && this._widgetsSyncAbort.abort) {
         this._widgetsSyncAbort.abort();
         this._widgetsSyncAbort = null;

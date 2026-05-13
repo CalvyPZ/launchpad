@@ -467,7 +467,10 @@ export function loadWidgetsDocument() {
 
 export function saveWidgets(widgets, options = {}) {
   const payload = normaliseWidgetRows(widgets || []);
-  const updatedAt = parseUpdatedAt(options.updatedAt) || new Date().toISOString();
+  /* When callers pass `updatedAt` (even null/undefined), do not fabricate a timestamp — init uses this
+     so a cold load does not stamp defaults as "newer than server" and overwrite remote state on sync. */
+  const updatedAt =
+    "updatedAt" in options ? parseUpdatedAt(options.updatedAt) : new Date().toISOString();
   localStorage.setItem(
     WIDGETS_KEY,
     JSON.stringify({
@@ -481,9 +484,11 @@ export function saveWidgets(widgets, options = {}) {
 
 export function getWidgetPayloadForApi(widgets, options = {}) {
   const toolsWidgets = options.toolsWidgets;
+  const updatedAt =
+    "updatedAt" in options ? parseUpdatedAt(options.updatedAt) : new Date().toISOString();
   return {
     version: WIDGETS_DOCUMENT_VERSION,
-    updatedAt: parseUpdatedAt(options.updatedAt) || new Date().toISOString(),
+    updatedAt,
     widgets: normaliseWidgetRows(widgets || []),
     ...(Array.isArray(toolsWidgets) ? { toolsWidgets: normaliseToolsRows(toolsWidgets || []) } : {}),
   };

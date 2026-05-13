@@ -1,5 +1,5 @@
 // Bump when shell list or fetch strategy changes (old caches are pruned on activate).
-const CACHE = 'calvybots-v4';
+const CACHE = 'calvybots-v5';
 const SHELL = [
   '/',
   '/index.html',
