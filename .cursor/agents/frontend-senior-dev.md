@@ -35,7 +35,7 @@ Before implementing, read:
 2. Implement **minimal, cohesive** changes: preserve migrations and backward-compatible `localStorage` behavior; avoid breaking existing user layouts.
 3. For new widget capabilities: **stable per-instance ids**, scoped payloads, no global shared keys across instances; document tricky edge cases (timezone/DST, markdown safety) in brief comments or `team/` notes when behaviour is non-obvious.
 4. Call `migrateLegacyIfNeeded()` from `loadWidgets()`, from `addWidget()`, and from error recovery paths — never skip it.
-5. Update `team/style-guide.md` when you introduce **new interaction patterns** (resize handles, recurrence controls, markdown toolbar, etc.) that need tokenised rules.
+5. **Always** update `team/style-guide.md` in the **same change set** as any user-visible work you ship in `index.html`, `css/style.css`, or `js/widgets/` (and related `js/store.js` fields that affect UI copy, palette, or interaction contracts). Keep the style guide aligned with what is actually implemented—tokens, palettes, edit vs display behaviour, and touch/a11y expectations—so it does not drift from code.
 
 ## Quality bar
 

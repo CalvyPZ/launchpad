@@ -99,3 +99,13 @@ Frontend Dev implemented **`team/assignments-qa-remediation-v1.md`**; QA recorde
 
 Per **`team/assignments-qa-remediation-v1.md`** (Definition of done and ordered checklist), the Frontend remediation work is in place; **`team/qa-complete-v4.md`** records **QA remediation cycle 2** (**Pass with notes**, remediation DoD met from static review) and **QA remediation cycle 3 — ticker hygiene** (**Pass**, static), confirming todo-reset interval arm/disarm when the tab is hidden or visible and leaving no further code findings from that pass. **The Notes & To-Do QA remediation implementation track is closed from Team Lead’s perspective:** what remains is only interactive verification—the **QA — second cycle re-verify** list in the assignments file plus the supplement acceptance bullets in the same QA doc—so hands-on browser QA is still recommended before a client demo.
 
+### Client follow-up cycle — To-Do touch targets (2026-05-13)
+
+- **Status:** Closed.
+- **Scope delivered by Frontend Dev:** `css/style.css`, `js/widgets/todo.js`.
+- **Acceptance check passed:** larger mobile touch targets for done/remove (`.todo-task-done-toggle`, `.todo-item-handle`, `.todo-task-remove`), full-text tap toggle in display mode, strike-through styling for completed tasks, and compact edit-mode done toggle.
+
+### Client direction — commits & style guide (2026-05-13)
+
+- **Commits:** Include **all** files that are part of the same deliverable (including `team/` updates), not a subset of product files only.
+- **Frontend Dev:** **Always** update `team/style-guide.md` when shipping UI/CSS/widget/store-visible behaviour changes so documentation matches implementation (see `.cursor/agents/frontend-senior-dev.md` and `workflow-and-process.mdc`).

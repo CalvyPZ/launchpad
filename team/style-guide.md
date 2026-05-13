@@ -87,3 +87,32 @@
   - `icons`
 - `apple-mobile-web-app-capable` metadata should be available.
 - Add safe-area padding when the app runs in standalone mode.
+
+## To-Do widget (v4)
+
+Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.css`.
+
+### Data model
+
+- Per-task fields in `todoState.tasks[]`: `id`, `text`, `done`, optional `color`.
+- **`color`:** stored on each task; **`null` / empty / “none”** means “no accent” — the row uses the default border colour (`border` token `#3d3d3d`). Other values are normalised in `normalizeTodoTaskColor()`; legacy hexes from earlier pickers remain accepted for migration.
+- **`TODO_TASK_PALETTE`** (9 swatches, 3×3 row-major in UI): Cyan `#2dd4bf`, Blue `#3b82f6`, Green `#22c55e`, Red `#ef4444`, **None** (centre), Purple `#a855f7`, Pink `#ec4899`, White `#f0f0f0`, Orange `#f97316`.
+
+### Edit mode
+
+- Shows recurrence block (`never` / `daily` / `weekly`), local time, weekday when weekly.
+- “New task” row always available.
+- Task row: compact **done** toggle (✓ / ◯, touch-safe) + text input; left **colour bar** opens fixed-position 3×3 palette; **drag handle** (`≡`) for reorder; **remove** (`×`); HTML5 DnD within the list and **cross-list** moves onto another To-Do widget’s list.
+
+### Display mode
+
+- No recurrence UI; “New task” row still shown.
+- **No checkbox:** done state is toggled by tapping the **full-width task label button** (`todo-task-text-toggle`); completed tasks use **strikethrough** + muted text.
+- Same colour bar, drag handle, remove, DnD, and cross-list behaviour as edit mode.
+- Colour picker panel is **`position: fixed`** (viewport-clamped) so it is not clipped by the widget or scroll container.
+
+### Interaction & accessibility
+
+- Primary accent remains **cyan** (`#2dd4bf`) for focus rings and shell actions; task border colours may use the full palette above.
+- Touch: prefer **~44px** minimum hit areas on drag handle, remove, edit-mode done toggle, and text-toggle row (see `.todo-item-handle`, `.todo-task-remove`, `.todo-task-done-toggle`, `.todo-task-text-toggle`).
+- Icon-only controls need explicit `aria-label` / `aria-pressed` where stateful (`aria-pressed` on done toggles).
