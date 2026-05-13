@@ -72,8 +72,20 @@ header {
 }
 
 .dash-widget.editable {
-  border-color: #a78bfa;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 0 1px #a78bfa;
+  border-color: #2dd4bf;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 0 1px #2dd4bf;
+}
+
+.dnd-ghost-widget {
+  transform-origin: center;
+  transform: scale(1.04);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  opacity: 0.92;
+  border: 1px solid #2dd4bf;
+}
+
+body.dnd-active {
+  user-select: none;
 }
 
 .widget-shell--editing .widget-content {
@@ -94,7 +106,7 @@ header {
   color: #9a9a9a;
   font-weight: 600;
   line-height: 1.1;
-  border-left: 2px solid #22d3ee;
+  border-left: 2px solid #2dd4bf;
   padding-left: 0.4rem;
 }
 
@@ -124,19 +136,20 @@ header {
   border: 1px solid #3d3d3d;
   color: #cbd5e1;
   cursor: grab;
+  touch-action: none;
 }
 
 .widget-remove {
   right: 0.7rem;
   background: #2a2a2a;
-  border: 1px solid #a78bfa;
+  border: 1px solid #2dd4bf;
   color: #f0f0f0;
   cursor: pointer;
 }
 
 .widget-handle:hover,
 .widget-remove:hover {
-  border-color: #a78bfa;
+  border-color: #2dd4bf;
   color: #ffffff;
 }
 
@@ -174,7 +187,7 @@ button[type="submit"]:hover {
 
 .btn-primary,
 button[type="button"].bg-accent {
-  background: #a78bfa;
+  background: #2dd4bf;
   color: #1c1c1c;
 }
 
@@ -190,7 +203,7 @@ button[type="button"].bg-accent:hover {
 }
 
 .btn-ghost:hover {
-  border-color: #a78bfa;
+  border-color: #2dd4bf;
 }
 
 .note-area {
@@ -212,7 +225,7 @@ button[type="button"].bg-accent:hover {
 
 .note-area:focus-visible {
   outline: none;
-  border-color: #a78bfa;
+  border-color: #2dd4bf;
 }
 
 .bookmark-list {
@@ -245,7 +258,7 @@ button[type="button"].bg-accent:hover {
 .clock-time {
   font-size: 2rem;
   font-weight: 300;
-  color: #22d3ee;
+  color: #2dd4bf;
   letter-spacing: 0.01em;
   line-height: 1.1;
 }
@@ -270,7 +283,7 @@ select.search-input {
 .search-input:focus-visible,
 select.search-input:focus {
   outline: none;
-  border-color: #a78bfa;
+  border-color: #2dd4bf;
 }
 
 .sysinfo-grid {
@@ -366,13 +379,22 @@ select.search-input:focus {
 /* v4 fix: legacy malformed selectors moved to valid variants */
 
 :focus-visible {
-  outline: 2px solid #a78bfa;
+  outline: 2px solid #2dd4bf;
   outline-offset: 2px;
 }
 
 ::selection {
-  background: #a78bfa;
+  background: #2dd4bf;
   color: #1c1c1c;
+}
+
+.sysinfo-stat p:last-child {
+  color: #2dd4bf;
+}
+
+::selection {
+  background: #2dd4bf;
+  color: #1c1c;
 }
 
 ::-webkit-scrollbar {
@@ -393,12 +415,12 @@ select.search-input:focus {
 }
 
 .sysinfo-stat p:last-child {
-  color: #22d3ee;
+  color: #2dd4bf;
 }
 
 /* v4 fix: normalized focus/webkit selectors */
 :focus-visible {
-  outline: 2px solid #a78bfa;
+  outline: 2px solid #2dd4bf;
   outline-offset: 2px;
 }
 
@@ -704,6 +726,7 @@ select.search-input:focus {
   font-size: 1.05rem;
   line-height: 1;
   cursor: grab;
+  touch-action: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -738,6 +761,26 @@ select.search-input:focus {
 .todo-item.is-drop-target {
   border-color: #2dd4bf;
   box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.35);
+}
+
+.dnd-over {
+  outline: 2px dashed #2dd4bf;
+  outline-offset: 3px;
+}
+
+.dnd-task-placeholder {
+  height: 40px;
+  border-top: 2px solid #2dd4bf;
+  background: rgba(45, 212, 191, 0.07);
+  border-radius: 4px;
+  margin: 2px 0;
+}
+
+.dnd-ghost-task {
+  transform: scale(1.03);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  opacity: 0.9;
+  border: 1px solid #2dd4bf;
 }
 
 .todo-list.is-list-drop-target {
@@ -782,7 +825,7 @@ select.search-input:focus {
 
 .widget-title-input:focus-visible {
   outline: none;
-  border-color: #a78bfa;
+  border-color: #2dd4bf;
 }
 
 .dash-widget.editable .widget-content {
@@ -938,7 +981,7 @@ select.search-input:focus {
 }
 
 .notes-markdown-body a {
-  color: #22d3ee;
+  color: #2dd4bf;
 }
 
 @media (max-width: 768px) {
