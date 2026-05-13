@@ -99,6 +99,7 @@ export function render(container, context) {
   let listEl = null;
   const taskDragState = {
     active: false,
+    finalized: false,
     pointerId: null,
     sourceWidgetId: null,
     sourceTaskId: null,
@@ -107,11 +108,13 @@ export function render(container, context) {
     ghost: null,
     placeholder: null,
     destinationList: null,
+    /** Snapshot string so drop survives DOM churn / id type mismatches with dataset. */
+    destinationWidgetId: null,
     destinationTaskId: null,
     pointerOffsetX: 0,
     pointerOffsetY: 0,
     sourceRect: null,
-      pointerMoveHandler: null,
+    pointerMoveHandler: null,
   };
 
   container.className = "h-full todo-widget-root";
@@ -155,10 +158,18 @@ export function render(container, context) {
   const getTodoWidget = (widgetId) => {
     const id = String(widgetId || "");
     if (!id) return null;
-    const matches = (widget) => widget?.id === id && widget.type === "todo";
+    const matches = (widget) => String(widget?.id || "") === id && widget.type === "todo";
     const fromHome = Array.isArray(dashboard?.widgets) ? dashboard.widgets.find(matches) : null;
     if (fromHome) return fromHome;
     return Array.isArray(dashboard?.toolsWidgets) ? dashboard.toolsWidgets.find(matches) || null : null;
+  };
+
+  const resolveTodoListWidgetId = (listEl) => {
+    if (!listEl) return "";
+    const shell = listEl.closest(".dash-widget");
+    const fromShell = shell?.dataset?.widgetId;
+    const fromList = listEl.dataset?.widgetId;
+    return String(fromShell || fromList || "");
   };
 
   const readTasksForWidget = (widgetId) => {
@@ -166,7 +177,7 @@ export function render(container, context) {
     if (!widget?.todoState) return [];
     const normalized = normalizeTodoState(widget.todoState);
     widget.todoState = normalized;
-    if (widget.id === currentWidgetId) {
+    if (String(widget.id) === String(currentWidgetId)) {
       config.todoState = normalized;
       items = [...normalized.tasks];
     }
@@ -184,7 +195,7 @@ export function render(container, context) {
       ...normalized,
       tasks: safeTasks,
     };
-    if (widget.id === currentWidgetId) {
+    if (String(widget.id) === String(currentWidgetId)) {
       config.todoState = widget.todoState;
       items = [...safeTasks];
     }
@@ -246,7 +257,19 @@ export function render(container, context) {
     if (!payload) return;
     const sourceWidgetId = String(payload.sourceWidgetId || "");
     const taskId = String(payload.taskId || "");
-    if (!sourceWidgetId || !taskId || !destinationWidgetId) return;
+    const destId = String(destinationWidgetId || "");
+    if (!sourceWidgetId || !taskId || !destId) return;
+
+    if (!getTodoWidget(sourceWidgetId)) {
+      console.error("Todo move: source widget not found", sourceWidgetId);
+      return;
+    }
+
+    const sameWidget = sourceWidgetId === destId;
+    if (!sameWidget && !getTodoWidget(destId)) {
+      console.error("Todo move: destination widget not found", destId);
+      return;
+    }
 
     const sourceTasks = readTasksForWidget(sourceWidgetId);
     const sourceIndex = sourceTasks.findIndex((task) => task.id === taskId);
@@ -256,8 +279,7 @@ export function render(container, context) {
     const nextSourceTasks = [...sourceTasks];
     nextSourceTasks.splice(sourceIndex, 1);
 
-    const sameWidget = sourceWidgetId === destinationWidgetId;
-    const destinationBase = sameWidget ? [...nextSourceTasks] : readTasksForWidget(destinationWidgetId);
+    const destinationBase = sameWidget ? [...nextSourceTasks] : readTasksForWidget(destId);
     let destinationIndex = destinationTaskId
       ? destinationBase.findIndex((task) => task.id === destinationTaskId)
       : destinationBase.length;
@@ -274,16 +296,16 @@ export function render(container, context) {
       movedTask
     );
     writeTasksForWidget(sourceWidgetId, nextSourceTasks);
-    writeTasksForWidget(destinationWidgetId, nextDestinationTasks);
+    writeTasksForWidget(destId, nextDestinationTasks);
 
     const widgetInList = (list, wid) =>
-      Array.isArray(list) && list.some((w) => w?.id === wid);
-    if (widgetInList(dashboard.widgets, sourceWidgetId) || widgetInList(dashboard.widgets, destinationWidgetId)) {
+      Array.isArray(list) && list.some((w) => String(w?.id || "") === String(wid || ""));
+    if (widgetInList(dashboard.widgets, sourceWidgetId) || widgetInList(dashboard.widgets, destId)) {
       dashboard.persistWidgets();
     }
     if (
       widgetInList(dashboard.toolsWidgets, sourceWidgetId) ||
-      widgetInList(dashboard.toolsWidgets, destinationWidgetId)
+      widgetInList(dashboard.toolsWidgets, destId)
     ) {
       if (typeof dashboard.persistToolsWidgets === "function") {
         dashboard.persistToolsWidgets();
@@ -452,6 +474,7 @@ export function render(container, context) {
     document.body.appendChild(ghost);
 
     taskDragState.active = true;
+    taskDragState.finalized = false;
     taskDragState.pointerId = event.pointerId;
     taskDragState.sourceWidgetId = currentWidgetId;
     taskDragState.sourceTaskId = taskId;
@@ -459,6 +482,7 @@ export function render(container, context) {
     taskDragState.sourceList = sourceList;
     taskDragState.ghost = ghost;
     taskDragState.destinationList = null;
+    taskDragState.destinationWidgetId = null;
     taskDragState.destinationTaskId = null;
     taskDragState.pointerOffsetX = event.clientX - rect.left;
     taskDragState.pointerOffsetY = event.clientY - rect.top;
@@ -477,66 +501,71 @@ export function render(container, context) {
 
     const pointerX = event.clientX;
     const pointerY = event.clientY;
-    let destinationList = null;
-    let destinationTaskId = null;
 
-    const todoLists = getTodoLists();
-    for (const list of todoLists) {
+    const pointInList = (list) => {
       const bounds = list.getBoundingClientRect();
-      if (
+      return (
         pointerX >= bounds.left &&
         pointerX <= bounds.right &&
         pointerY >= bounds.top &&
         pointerY <= bounds.bottom
-      ) {
-        destinationList = list;
-        break;
+      );
+    };
+
+    const todoLists = getTodoLists();
+    const hits = todoLists.filter((list) => pointInList(list));
+
+    let destinationList = null;
+    if (hits.length === 1) {
+      destinationList = hits[0];
+    } else if (hits.length > 1) {
+      const nonSource = hits.filter((list) => list !== taskDragState.sourceList);
+      if (nonSource.length === 1) {
+        destinationList = nonSource[0];
+      } else if (nonSource.length > 1) {
+        let best = nonSource[0];
+        let bestD = Infinity;
+        for (const list of nonSource) {
+          const b = list.getBoundingClientRect();
+          const cx = (b.left + b.right) / 2;
+          const cy = (b.top + b.bottom) / 2;
+          const d = (pointerX - cx) ** 2 + (pointerY - cy) ** 2;
+          if (d < bestD) {
+            bestD = d;
+            best = list;
+          }
+        }
+        destinationList = best;
+      } else {
+        destinationList = taskDragState.sourceList;
       }
     }
 
     clearTodoDragState();
 
-    if (!destinationList) return;
-    destinationTaskId = getInsertionTargetTask(destinationList, pointerY);
+    if (!destinationList) {
+      taskDragState.destinationList = null;
+      taskDragState.destinationWidgetId = null;
+      taskDragState.destinationTaskId = null;
+      return;
+    }
+
+    const destinationTaskId = getInsertionTargetTask(destinationList, pointerY);
     destinationList.classList.add("is-list-drop-target");
     placePlaceholder(destinationList, destinationTaskId);
     taskDragState.destinationList = destinationList;
+    taskDragState.destinationWidgetId = resolveTodoListWidgetId(destinationList);
     taskDragState.destinationTaskId = destinationTaskId;
   };
 
-  const onTaskPointerUp = (event) => {
+  const detachTaskPointerMove = () => {
     if (taskDragState.pointerMoveHandler) {
       document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
       taskDragState.pointerMoveHandler = null;
     }
-    if (!taskDragState.active || event.pointerId !== taskDragState.pointerId) return;
-    const payload = makeTaskPayload(taskDragState.sourceWidgetId, taskDragState.sourceTaskId);
-    const destinationWidgetId = taskDragState.destinationList?.dataset?.widgetId;
-    const destinationTaskId = taskDragState.destinationTaskId || null;
-    const shouldCommit = Boolean(payload && destinationWidgetId);
-    if (shouldCommit) {
-      moveTask(payload, destinationWidgetId, destinationTaskId);
-    }
-    onTaskDragEnd(shouldCommit);
   };
 
-  const onTaskPointerCancel = () => {
-    if (taskDragState.pointerMoveHandler) {
-      document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
-      taskDragState.pointerMoveHandler = null;
-    }
-    onTaskDragEnd(false);
-  };
-
-  const onTaskLostPointerCapture = () => {
-    if (taskDragState.pointerMoveHandler) {
-      document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
-      taskDragState.pointerMoveHandler = null;
-    }
-    onTaskDragEnd(false);
-  };
-
-  const onTaskDragEnd = (shouldMutate = false) => {
+  const finishTaskDragEnd = (shouldMutate = false) => {
     if (taskDragState.ghost && taskDragState.ghost.isConnected) {
       taskDragState.ghost.remove();
     }
@@ -551,15 +580,48 @@ export function render(container, context) {
     taskDragState.ghost = null;
     taskDragState.placeholder = null;
     taskDragState.destinationList = null;
+    taskDragState.destinationWidgetId = null;
     taskDragState.destinationTaskId = null;
     taskDragState.pointerOffsetX = 0;
     taskDragState.pointerOffsetY = 0;
     taskDragState.sourceRect = null;
-    if (taskDragState.pointerMoveHandler) {
-      document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
-      taskDragState.pointerMoveHandler = null;
-    }
+    detachTaskPointerMove();
     if (!shouldMutate) return;
+  };
+
+  const tryFinalizeTaskDrop = (event) => {
+    detachTaskPointerMove();
+    if (taskDragState.finalized) return;
+    if (!taskDragState.active) return;
+    if (event && typeof event.pointerId === "number" && event.pointerId !== taskDragState.pointerId) return;
+    taskDragState.finalized = true;
+
+    const payload = makeTaskPayload(taskDragState.sourceWidgetId, taskDragState.sourceTaskId);
+    const destWidgetId =
+      String(taskDragState.destinationWidgetId || "").trim() || resolveTodoListWidgetId(taskDragState.destinationList);
+    const destinationTaskId = taskDragState.destinationTaskId || null;
+    const shouldCommit = Boolean(payload && destWidgetId);
+    if (shouldCommit) {
+      moveTask(payload, destWidgetId, destinationTaskId);
+    }
+    finishTaskDragEnd(shouldCommit);
+  };
+
+  const onTaskPointerUp = (event) => {
+    tryFinalizeTaskDrop(event);
+  };
+
+  const onTaskPointerCancel = (event) => {
+    detachTaskPointerMove();
+    if (taskDragState.finalized) return;
+    if (!taskDragState.active) return;
+    if (event && typeof event.pointerId === "number" && event.pointerId !== taskDragState.pointerId) return;
+    taskDragState.finalized = true;
+    finishTaskDragEnd(false);
+  };
+
+  const onTaskLostPointerCapture = (event) => {
+    tryFinalizeTaskDrop(event);
   };
 
   const onRecurrenceChange = () => {
@@ -813,8 +875,13 @@ export function render(container, context) {
       listEl?.removeEventListener("keydown", onTaskListKeydown);
       window.removeEventListener("scroll", onTodoColorPanelRelocate, true);
       window.removeEventListener("resize", onTodoColorPanelRelocate);
-      onTaskDragEnd(false);
+      detachTaskPointerMove();
+      if (!taskDragState.finalized && taskDragState.active) {
+        taskDragState.finalized = true;
+        finishTaskDragEnd(false);
+      }
       closeColorPanel();
+      items = [...normalizeTodoState(config.todoState).tasks];
       syncCurrentWidget();
     },
   };
