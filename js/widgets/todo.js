@@ -153,8 +153,12 @@ export function render(container, context) {
   const addBtn = container.querySelector("[data-todo-add]");
 
   const getTodoWidget = (widgetId) => {
-    if (!dashboard?.widgets || !Array.isArray(dashboard.widgets)) return null;
-    return dashboard.widgets.find((widget) => widget?.id === widgetId && widget.type === "todo") || null;
+    const id = String(widgetId || "");
+    if (!id) return null;
+    const matches = (widget) => widget?.id === id && widget.type === "todo";
+    const fromHome = Array.isArray(dashboard?.widgets) ? dashboard.widgets.find(matches) : null;
+    if (fromHome) return fromHome;
+    return Array.isArray(dashboard?.toolsWidgets) ? dashboard.toolsWidgets.find(matches) || null : null;
   };
 
   const readTasksForWidget = (widgetId) => {
@@ -189,7 +193,13 @@ export function render(container, context) {
 
   const syncCurrentWidget = () => {
     writeTasksForWidget(currentWidgetId, items);
-    dashboard.persistWidgets();
+    const id = currentWidgetId;
+    if (dashboard.widgets?.some((w) => w?.id === id)) {
+      dashboard.persistWidgets();
+    }
+    if (dashboard.toolsWidgets?.some((w) => w?.id === id) && typeof dashboard.persistToolsWidgets === "function") {
+      dashboard.persistToolsWidgets();
+    }
   };
 
   const syncTodoControlsFromDom = () => {
@@ -265,7 +275,20 @@ export function render(container, context) {
     );
     writeTasksForWidget(sourceWidgetId, nextSourceTasks);
     writeTasksForWidget(destinationWidgetId, nextDestinationTasks);
-    dashboard.persistWidgets();
+
+    const widgetInList = (list, wid) =>
+      Array.isArray(list) && list.some((w) => w?.id === wid);
+    if (widgetInList(dashboard.widgets, sourceWidgetId) || widgetInList(dashboard.widgets, destinationWidgetId)) {
+      dashboard.persistWidgets();
+    }
+    if (
+      widgetInList(dashboard.toolsWidgets, sourceWidgetId) ||
+      widgetInList(dashboard.toolsWidgets, destinationWidgetId)
+    ) {
+      if (typeof dashboard.persistToolsWidgets === "function") {
+        dashboard.persistToolsWidgets();
+      }
+    }
     if (sameWidget) {
       if (sourceWidgetId === currentWidgetId) {
         items = [...nextDestinationTasks];

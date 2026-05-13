@@ -146,4 +146,4 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 - Task reordering attaches pointer handling to `.todo-item-handle`; a fixed-position clone adopts `.dnd-ghost-task`.
 - While dragging tasks, all `.todo-list` elements participate as drop targets; insertion is driven by midpoint logic and visualized with `.dnd-task-placeholder` and `.is-list-drop-target`.
 - Pointer drag over state is reflected with `.dnd-over` and body suppression is handled via `body.dnd-active` (`user-select: none`, `touch-action: none`).
-- Mobile/touch interaction prevents scroll capture with `touch-action: none` on `.widget-handle`, `.todo-item-handle`, `.dash-widget`, `.todo-item`, `.dnd-ghost-widget`, `.dnd-ghost-task`, and while `body.dnd-active`.
+- Mobile/touch: `touch-action: none` on drag handles (`.widget-handle`, `.todo-item-handle`), on drag ghosts (`.dnd-ghost-widget`, `.dnd-ghost-task`), and on `body.dnd-active` while a drag is in progress — so `.todo-list` and widget shells can scroll normally when not dragging.
