@@ -239,11 +239,42 @@ document.addEventListener("alpine:init", () => {
     _pagehideHandler: null,
     _beforeUnloadHandler: null,
     _isExiting: false,
+    forceShellRetrieveBusy: false,
+    forceShellRetrieveError: null,
 
     navigateTo(page) {
       const next = pageKeys.has(page) ? page : "home";
+      if (this.currentPage === "debug" && next !== "debug") {
+        this.forceShellRetrieveError = null;
+      }
       this.currentPage = next;
       this.closeAddWidgetPicker(false);
+    },
+
+    async forceShellRetrieveFromServer() {
+      this.forceShellRetrieveError = null;
+      if (this.forceShellRetrieveBusy) return;
+      if (!this.online) {
+        this.forceShellRetrieveError =
+          "You appear to be offline. Connect to the network first, then try again — clearing the shell cache while offline can prevent the app from loading.";
+        return;
+      }
+      if (!("caches" in window) || typeof caches?.keys !== "function") {
+        this.forceShellRetrieveError =
+          "Cache Storage is not available here. Use a hard refresh in your browser (for example Ctrl+Shift+R) or clear cached data for this site.";
+        return;
+      }
+      this.forceShellRetrieveBusy = true;
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+        location.reload();
+      } catch (err) {
+        console.error("forceShellRetrieveFromServer", err);
+        this.forceShellRetrieveBusy = false;
+        this.forceShellRetrieveError =
+          "Could not clear app caches. Try a hard refresh (Ctrl+Shift+R) or clear site data for this origin.";
+      }
     },
 
     persistToolsWidgets(options = {}) {

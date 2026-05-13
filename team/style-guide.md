@@ -144,13 +144,14 @@
 
 ## Footer debug strip (widget sync state)
 
-- The footer now displays a live sync debug strip inside the existing `x-data="launchpad"` shell.
+- The footer (`#widget-sync-strip`) displays a live sync debug strip inside the existing `x-data="launchpad"` shell.
 - The strip surfaces:
   - last successful sync timestamp (GET and PUT),
   - current local sync state (`synced`, `pending`, `uploading`),
   - next outbound attempt countdown (`debounced` countdown vs periodic retry interval),
   - last outbound outcome (`success`, `queued`, `failed`, `skipped`),
   - retrieve policy as explicit `bootstrap-only / not currently polling` text.
+- **Force retrieve from server:** a secondary-style control (`.widget-sync-strip-force-btn.btn-soft`, ≥42px height) appears in `.widget-sync-strip-actions` below the metrics grid when `currentPage === 'debug'`. Activation deletes **all** Cache Storage keys for this origin (including the service worker shell cache, currently `launchpad-v5` in `sw.js`), then `location.reload()` so the next load refetches the same-origin shell under the existing network-first worker. **localStorage / widget data are not cleared.** While the operation runs, the button is disabled with `aria-busy="true"` and label “Clearing caches…”. If `caches` is unavailable, the request is offline, or deletion throws, a single **amber** (`#f59e0b`) inline message with `role="alert"` explains the failure and suggests hard refresh; Alpine state stays consistent (no uncaught throws from the handler).
 - Visual treatment uses the existing cyan token family on dark UI surfaces and adds no new purple/violet active accents.
 - Debug strip is only rendered when `currentPage === 'debug'`.
 
@@ -212,11 +213,9 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 - Primary home is the **Tools** landing grid (`#tools-grid`, `launchpad_tools_landing_widgets`): default layout is one Fortnight row (`widget-tools-fortnight`); legacy `placeholder` rows migrate to `fortnight` on load, and the former default placeholder id (`widget-tools-tab-placeholder`) maps to the canonical Fortnight id when present.
 - Implementation: `js/widgets/fortnight-tools.js`; per-instance settings live in `widgetRow.fortnightState` and persist with the row (including from **Tools** edit mode and `saveToolsLandingWidgets()` in `js/store.js`).
 - **Debug grid:** older saves may still contain `fortnight` on `launchpad_tools_widgets`; those rows continue to render, but **Add Widget** on Debug only offers Status and Log.
-- Inputs in the widget: FN start date, line number at FN start, rotate-from, rotate-to, and target date.
-- Output sentence format is fixed: `On {Date} you will be on line {line number}`.
+- **Calculate-gated UX:** Numeric fields use free typing (no HTML `min`/`max`); values are **not** clamped, swapped, or persisted on each keystroke. **Calculate** (primary control: `.btn-primary`, full-width, ≥42px height) reads all fields, validates them, then either runs the calculator or shows a **plain-language error** in the result region (amber border/background, `role="alert"`) — never a cyan success line when validation fails. On success, the result region uses the usual cyan-on-dark treatment (`role="status"`, `aria-live="polite"`) with: `On {Date} you will be on line {line number}` (date via `formatResultDate`). While the draft differs from the last successful commit, the result area shows a neutral slate hint: “Press Calculate to update the line.”
+- **Persistence:** `fortnightState` is updated and the usual persist hooks run **only after a successful Calculate** (normalized snapshot). Reload shows the last persisted successful inputs and the same outcome sentence (recomputed from that snapshot). Malformed or partial rows on load are still normalized for display via `mergeFortnightState()` in `js/store.js`; the widget does not rewrite user drafts until Calculate succeeds.
+- Inputs in the widget: FN start date, line number at FN start, rotate-from, rotate-to, and target date (`type="date"` for dates; numbers use `inputmode="numeric"` only).
 - Line progression: count Sundays after FN start through target date, then advance by +1 every second Sunday (`Math.floor(sundayCount / 2)`), wrapping to the configured range.
-- Storage and UX: all fields persist in the row, and target date can be changed directly without re-entering other values.
-- Edge handling documented in implementation:
-  - rotate-from / rotate-to is normalized by swap when out of order;
-  - target date before FN start returns the configured start-line;
-  - line-at-start is clamped into the rotation range.
+- **Validation (Calculate only):** Calendar dates must be complete `YYYY-MM-DD` values that parse; rotate-from, rotate-to, and line-at-start must be positive integers (no leading zeros); rotate-from ≤ rotate-to; line-at-start must lie in that inclusive range.
+- Edge handling in the **calculation** (unchanged): target date before FN start returns the configured start-line; invalid Calculate inputs do not run the line algorithm.

@@ -239,6 +239,7 @@
       </div>
 
       <footer
+        id="widget-sync-strip"
         x-show="currentPage === 'debug'"
         class="widget-sync-strip border-t border-border text-xs text-text-3"
         x-cloak
@@ -270,6 +271,24 @@
               <span class="widget-sync-strip-label">Retrieve policy</span>
               <span class="widget-sync-strip-value" x-text="widgetSyncStripRetrieveLabel()"></span>
             </p>
+          </div>
+          <div class="widget-sync-strip-actions" x-show="currentPage === 'debug'">
+            <button
+              type="button"
+              class="widget-sync-strip-force-btn btn-soft"
+              @click="forceShellRetrieveFromServer()"
+              :disabled="forceShellRetrieveBusy"
+              :aria-busy="forceShellRetrieveBusy ? 'true' : 'false'"
+              aria-label="Force retrieve app shell from server: clear Cache Storage for this site, then reload (widget data in local storage is kept)"
+            >
+              <span x-text="forceShellRetrieveBusy ? 'Clearing caches…' : 'Force retrieve from server'"></span>
+            </button>
+            <p
+              class="widget-sync-strip-force-error"
+              role="alert"
+              x-show="forceShellRetrieveError"
+              x-text="forceShellRetrieveError"
+            ></p>
           </div>
         </div>
       </footer>
