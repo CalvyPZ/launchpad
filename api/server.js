@@ -1,14 +1,16 @@
 /**
- * CalvyBots Launchpad â€” API sidecar
+ * CalvyBots Launchpad — API sidecar
  *
  * Runs on port 3000 inside the Docker network; nginx proxies /api/* to this process.
- * No external dependencies â€” plain Node.js http module only.
+ * No external dependencies — plain Node.js http module only.
  *
  * Routes (see data/schema.md for response shapes):
- *   GET /api/health  â€” liveness check
- *   GET /api/system  â€” runtime diagnostics
- *   GET /api/config  â€” serves ../data/config.json
- *   *                â€” 404 JSON
+ *   GET /api/health       — liveness check
+ *   GET /api/system       — runtime diagnostics
+ *   GET /api/config       — serves ../data/config.json
+ *   GET /api/widgets      — returns persisted widget document
+ *   PUT /api/widgets      — validates + persists widget document atomically
+ *   *                    — 404 JSON
  */
 
 'use strict';
@@ -19,7 +21,16 @@ const path = require('path');
 
 const PORT = Number(process.env.PORT) || 3000;
 const CONFIG_PATH = path.resolve(__dirname, '..', 'data', 'config.json');
+const WIDGETS_PATH = path.resolve(__dirname, '..', 'data', 'widgets.json');
+const fsp = fs.promises;
 const startTime = Date.now();
+
+const WIDGETS_SCHEMA_VERSION = 1;
+const DEFAULT_MIN_WIDTH = 250;
+const DEFAULT_MIN_HEIGHT = 178;
+const MAX_WIDGET_PAYLOAD_BYTES = 2 * 1024 * 1024;
+
+let writeQueue = Promise.resolve();
 
 function uptime() {
   return Math.floor((Date.now() - startTime) / 1000);
@@ -33,6 +44,292 @@ function sendJson(res, status, body) {
     'Cache-Control': 'no-store',
   });
   res.end(payload);
+}
+
+function buildDefaultNotesState() {
+  return { markdown: '', viewMode: 'split' };
+}
+
+function buildDefaultTodoState() {
+  return {
+    tasks: [],
+    recurrence: 'never',
+    timeLocal: '09:00',
+    weekday: 1,
+    lastResetAt: null,
+  };
+}
+
+function buildDefaultWidgetRows() {
+  return [
+    {
+      id: 'widget-clock',
+      type: 'clock',
+      position: 0,
+      visible: true,
+      title: 'Clock',
+      minWidth: DEFAULT_MIN_WIDTH,
+      minHeight: DEFAULT_MIN_HEIGHT,
+      width: null,
+      height: null,
+    },
+    {
+      id: 'widget-notes',
+      type: 'notes',
+      position: 1,
+      visible: true,
+      title: 'Notes',
+      minWidth: DEFAULT_MIN_WIDTH,
+      minHeight: DEFAULT_MIN_HEIGHT,
+      width: null,
+      height: null,
+      notesState: buildDefaultNotesState(),
+    },
+    {
+      id: 'widget-todo',
+      type: 'todo',
+      position: 2,
+      visible: true,
+      title: 'To-Do',
+      minWidth: DEFAULT_MIN_WIDTH,
+      minHeight: DEFAULT_MIN_HEIGHT,
+      width: null,
+      height: null,
+      todoState: buildDefaultTodoState(),
+    },
+  ];
+}
+
+function buildDefaultWidgetDocument() {
+  return {
+    schemaVersion: WIDGETS_SCHEMA_VERSION,
+    updatedAt: new Date().toISOString(),
+    widgets: buildDefaultWidgetRows(),
+  };
+}
+
+function normalizeNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function normalizeNotesState(raw) {
+  const base = buildDefaultNotesState();
+  if (!raw || typeof raw !== 'object') return base;
+
+  return {
+    ...base,
+    markdown: typeof raw.markdown === 'string' ? raw.markdown : base.markdown,
+    viewMode: raw.viewMode === 'edit' || raw.viewMode === 'preview' || raw.viewMode === 'split'
+      ? raw.viewMode
+      : base.viewMode,
+  };
+}
+
+function normalizeTodoState(raw) {
+  const base = buildDefaultTodoState();
+  if (!raw || typeof raw !== 'object') return base;
+
+  const tasks = Array.isArray(raw.tasks)
+    ? raw.tasks
+        .map((task, index) => ({
+          id: String(task?.id || `task-${index}`),
+          text: typeof task?.text === 'string' ? task.text : '',
+          done: Boolean(task?.done),
+          color: typeof task?.color === 'string' ? task.color : null,
+        }))
+        .filter((task) => task.text.length || task.id)
+    : base.tasks;
+
+  return {
+    ...base,
+    tasks: tasks.length ? tasks : base.tasks,
+    recurrence: raw.recurrence === 'daily' || raw.recurrence === 'weekly' ? raw.recurrence : base.recurrence,
+    timeLocal: typeof raw.timeLocal === 'string' ? raw.timeLocal : base.timeLocal,
+    weekday: normalizeNumber(raw.weekday, base.weekday),
+    lastResetAt: raw.lastResetAt == null ? null : String(raw.lastResetAt),
+  };
+}
+
+function parseAndNormalizeRow(rawRow, index) {
+  if (!rawRow || typeof rawRow !== 'object') {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Invalid widget row',
+      detail: `Widget row at index ${index} must be an object`,
+    };
+  }
+
+  const id = typeof rawRow.id === 'string' ? rawRow.id.trim() : '';
+  if (!id) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Invalid widget row',
+      detail: `Widget row at index ${index} must include a non-empty string id`,
+    };
+  }
+
+  const type = typeof rawRow.type === 'string' ? rawRow.type.trim() : '';
+  if (!type) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Invalid widget row',
+      detail: `Widget row at index ${index} must include a non-empty string type`,
+    };
+  }
+
+  const rawPosition = Number(rawRow.position);
+  if (!Number.isFinite(rawPosition) || !Number.isInteger(rawPosition) || rawPosition < 0) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Invalid widget row',
+      detail: `Widget row id="${id}" must include a non-negative integer position`,
+    };
+  }
+
+  const row = {
+    id,
+    type,
+    position: rawPosition,
+    visible: rawRow.visible === false ? false : true,
+    title: typeof rawRow.title === 'string' ? rawRow.title : '',
+    minWidth: normalizeNumber(rawRow.minWidth, DEFAULT_MIN_WIDTH),
+    minHeight: normalizeNumber(rawRow.minHeight, DEFAULT_MIN_HEIGHT),
+    width: rawRow.width == null || rawRow.width === '' ? null : normalizeNumber(rawRow.width, null),
+    height: rawRow.height == null || rawRow.height === '' ? null : normalizeNumber(rawRow.height, null),
+  };
+
+  if (Object.is(row.width, NaN)) {
+    row.width = null;
+  }
+
+  if (Object.is(row.height, NaN)) {
+    row.height = null;
+  }
+
+  if (type === 'notes') {
+    row.notesState = normalizeNotesState(rawRow.notesState);
+  }
+
+  if (type === 'todo') {
+    row.todoState = normalizeTodoState(rawRow.todoState);
+  }
+
+  return { ok: true, value: row };
+}
+
+function parseAndNormalizeWidgetsPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Invalid payload',
+      detail: 'Payload must be a JSON object',
+    };
+  }
+
+  const rows = Array.isArray(payload.widgets)
+    ? payload.widgets
+    : null;
+  if (!rows) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Invalid payload',
+      detail: 'Payload must include a widgets array',
+    };
+  }
+
+  const normalizedRows = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const result = parseAndNormalizeRow(rows[index], index);
+    if (!result.ok) {
+      return result;
+    }
+    normalizedRows.push(result.value);
+  }
+
+  return {
+    ok: true,
+    value: {
+      schemaVersion: Number.isInteger(payload.schemaVersion) ? payload.schemaVersion : WIDGETS_SCHEMA_VERSION,
+      updatedAt: new Date().toISOString(),
+      widgets: normalizedRows,
+    },
+  };
+}
+
+function normalizeStoredDocument(payload) {
+  const result = parseAndNormalizeWidgetsPayload(payload);
+  if (!result.ok) {
+    return buildDefaultWidgetDocument();
+  }
+
+  return {
+    ...result.value,
+    updatedAt: typeof payload.updatedAt === 'string' && payload.updatedAt.trim() ? payload.updatedAt.trim() : result.value.updatedAt,
+  };
+}
+
+async function readWidgetsFromDisk() {
+  try {
+    const raw = await fsp.readFile(WIDGETS_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    return normalizeStoredDocument(parsed);
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) {
+      return buildDefaultWidgetDocument();
+    }
+    throw error;
+  }
+}
+
+async function writeWidgetsAtomic(document) {
+  const tmpPath = `${WIDGETS_PATH}.${process.pid}.${Date.now()}.tmp`;
+  const payload = JSON.stringify(document);
+  try {
+    await fsp.writeFile(tmpPath, payload, 'utf8');
+    await fsp.rename(tmpPath, WIDGETS_PATH);
+  } finally {
+    await fsp.unlink(tmpPath).catch(() => undefined);
+  }
+}
+
+function queueWidgetPersist(document) {
+  const run = () => writeWidgetsAtomic(document);
+  const next = writeQueue.then(run, run);
+  writeQueue = next.catch(() => undefined);
+  return next;
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > MAX_WIDGET_PAYLOAD_BYTES) {
+        reject({
+          status: 413,
+          error: 'Payload too large',
+          detail: `Payload exceeded limit of ${MAX_WIDGET_PAYLOAD_BYTES} bytes`,
+        });
+      }
+    });
+
+    req.on('end', () => resolve(body));
+    req.on('error', (error) => {
+      reject({
+        status: 500,
+        error: 'Request body error',
+        detail: error.message,
+      });
+    });
+  });
 }
 
 function handleHealth(res) {
@@ -63,6 +360,7 @@ function handleConfig(res) {
       sendJson(res, 500, { error: 'Failed to read config', detail: err.message });
       return;
     }
+
     let parsed;
     try {
       parsed = JSON.parse(data);
@@ -70,31 +368,117 @@ function handleConfig(res) {
       sendJson(res, 500, { error: 'Failed to read config', detail: parseErr.message });
       return;
     }
+
     sendJson(res, 200, parsed);
   });
+}
+
+async function handleGetWidgets(res) {
+  try {
+    const doc = await readWidgetsFromDisk();
+    sendJson(res, 200, doc);
+  } catch (error) {
+    console.error('[api] Failed to read widgets:', error);
+    sendJson(res, 500, {
+      error: 'Failed to read widgets',
+      detail: error.message,
+    });
+  }
+}
+
+async function handlePutWidgets(req, res) {
+  try {
+    const body = await readRequestBody(req);
+
+    if (!body.trim()) {
+      sendJson(res, 400, {
+        error: 'Invalid payload',
+        detail: 'Request body is required',
+      });
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch (parseErr) {
+      sendJson(res, 400, {
+        error: 'Invalid payload',
+        detail: parseErr.message,
+      });
+      return;
+    }
+
+    const normalized = parseAndNormalizeWidgetsPayload(parsed);
+    if (!normalized.ok) {
+      sendJson(res, normalized.status, {
+        error: normalized.error,
+        detail: normalized.detail,
+      });
+      return;
+    }
+
+    await queueWidgetPersist(normalized.value);
+    sendJson(res, 200, normalized.value);
+  } catch (error) {
+    const status = error && Number.isInteger(error.status) ? error.status : 500;
+    sendJson(res, status, {
+      error: error && error.error ? error.error : 'Request failed',
+      detail: error && error.detail ? error.detail : error.message,
+    });
+  }
 }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const pathname = url.pathname.replace(/\/$/, '') || '/';
 
-  if (req.method !== 'GET') {
-    sendJson(res, 405, { error: 'Method not allowed' });
-    return;
-  }
-
   switch (pathname) {
     case '/api/health':
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed', detail: 'Use GET /api/health' });
+        return;
+      }
       handleHealth(res);
       break;
+
     case '/api/system':
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed', detail: 'Use GET /api/system' });
+        return;
+      }
       handleSystem(res);
       break;
+
     case '/api/config':
+      if (req.method !== 'GET') {
+        sendJson(res, 405, { error: 'Method not allowed', detail: 'Use GET /api/config' });
+        return;
+      }
       handleConfig(res);
       break;
+
+    case '/api/widgets':
+      if (req.method === 'GET') {
+        void handleGetWidgets(res);
+        return;
+      }
+      if (req.method === 'PUT') {
+        void handlePutWidgets(req, res);
+        return;
+      }
+      sendJson(res, 405, {
+        error: 'Method not allowed',
+        detail: 'Use GET or PUT /api/widgets',
+      });
+      break;
+
     default:
-      sendJson(res, 404, { error: 'Not found' });
+      sendJson(res, 404, {
+        error: 'Not found',
+        detail: pathname.startsWith('/api/') ? `Route ${pathname} is not defined` : `${pathname} is not a static API path`,
+      });
+      break;
   }
 });
 

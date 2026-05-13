@@ -1,5 +1,5 @@
 import {
-  loadWidgets,
+  loadWidgetsDocument,
   saveWidgets,
   loadToolsWidgets,
   saveToolsWidgets,
@@ -8,7 +8,9 @@ import {
   defaultNotesState,
   defaultTodoState,
   evaluateAllTodoResets,
-  migrateLegacyIfNeeded,
+  getWidgetPayloadForApi,
+  loadWidgetPayloadFromApi,
+  normaliseWidgetRows,
 } from "./store.js";
 import * as clockWidget from "./widgets/clock.js";
 import * as notesWidget from "./widgets/notes.js";
@@ -22,6 +24,50 @@ const widgetFactories = {
   todo: todoWidget.render,
 };
 const widgetTypeSet = new Set(widgetTypes);
+const WIDGETS_API_URL = "/api/widgets";
+const WIDGET_SYNC_DEBOUNCE_MS = 900;
+const WIDGET_SYNC_POLL_MS = 4000;
+
+function compareUpdatedAt(leftTs, rightTs) {
+  const left = leftTs ? new Date(leftTs).getTime() : NaN;
+  const right = rightTs ? new Date(rightTs).getTime() : NaN;
+  if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+  if (!Number.isFinite(left)) return -1;
+  if (!Number.isFinite(right)) return 1;
+  if (left > right) return 1;
+  if (left < right) return -1;
+  return 0;
+}
+
+function pickServerPayload(raw) {
+  if (!raw) return null;
+  if (Array.isArray(raw)) {
+    return { version: 1, updatedAt: null, widgets: normaliseWidgetRows(raw) };
+  }
+  if (Array.isArray(raw.widgets)) {
+    return {
+      version: raw.version || 1,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+      widgets: normaliseWidgetRows(raw.widgets),
+    };
+  }
+  if (Array.isArray(raw.data?.widgets)) {
+    return {
+      version: raw.version || 1,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+      widgets: normaliseWidgetRows(raw.data.widgets),
+    };
+  }
+  return null;
+}
+
+function formatSyncMessage(syncState, online, hasPendingSync, isSyncing) {
+  if (isSyncing) return "Syncing widgets…";
+  if (!online) return "Offline: dashboard changes are saved locally and will sync when online.";
+  if (hasPendingSync) return "Saving changes to server…";
+  if (syncState === "error") return "Last sync failed. Changes are preserved locally and will retry.";
+  return "";
+}
 const addWidgetChoices = [
   { type: "clock", label: "Clock", icon: "🕐" },
   { type: "notes", label: "Sticky Notes", icon: "📝" },
@@ -100,6 +146,14 @@ document.addEventListener("alpine:init", () => {
     currentPage: "home",
     clockTitle: "",
     online: typeof navigator !== "undefined" ? navigator.onLine : true,
+    syncState: "unknown",
+    _widgetsSyncTimer: null,
+    _widgetsSyncInFlight: false,
+    _widgetsSyncAbort: null,
+    _widgetsNeedSync: false,
+    _widgetsUpdatedAt: null,
+    _widgetsPollTimer: null,
+    _widgetsPendingRemotePayload: null,
     widgetMapEl: null,
     toolsGridEl: null,
     _pendingWidgetFocusId: null,
@@ -125,14 +179,30 @@ document.addEventListener("alpine:init", () => {
       this.toolsGridEl = this.$refs?.toolsGrid || document.getElementById("tools-grid");
       this._onlineHandler = () => {
         this.online = true;
+        this.syncState = "online";
+        if (this._widgetsNeedSync) {
+          void this.syncToServer();
+          this._armWidgetsSyncPoller();
+          return;
+        }
+        void this.reconcileServerWidgets("online");
+        this._applyPendingRemotePayload();
+        this._armWidgetsSyncPoller();
       };
       this._offlineHandler = () => {
         this.online = false;
+        this.syncState = "offline";
+        this._disarmWidgetsSyncPoller();
       };
       window.addEventListener("online", this._onlineHandler);
       window.addEventListener("offline", this._offlineHandler);
       this.refreshClock();
-      this.widgets = loadWidgets();
+
+      const localDocument = loadWidgetsDocument();
+      this.widgets = localDocument.widgets;
+      this._widgetsUpdatedAt = localDocument.updatedAt;
+      this.syncState = localDocument.updatedAt ? "local" : "unknown";
+
       this.toolsWidgets = loadToolsWidgets();
       this._visibilityHandler = () => {
         if (document.visibilityState === "visible") {
@@ -145,20 +215,98 @@ document.addEventListener("alpine:init", () => {
             this.renderPageWidgets("home");
             this.renderPageWidgets("tools");
           }
+          if (this._widgetsNeedSync && this.online) {
+            void this.syncToServer();
+            this._armWidgetsSyncPoller();
+            return;
+          }
+          this._applyPendingRemotePayload();
+          void this.reconcileServerWidgets("visible");
           this._armTodoResetTicker();
+          this._armWidgetsSyncPoller();
         } else {
+          this._disarmWidgetsSyncPoller();
           this._disarmTodoResetTicker();
         }
       };
       document.addEventListener("visibilitychange", this._visibilityHandler);
       this.renderPageWidgets("home");
       this.renderPageWidgets("tools");
-      this.persistWidgets();
+      this.persistWidgets({ sync: false });
       this.persistToolsWidgets();
       if (this._clockTicker) window.clearInterval(this._clockTicker);
       this._clockTicker = window.setInterval(() => this.refreshClock(), 1000);
+      void this.reconcileServerWidgets("init");
       if (document.visibilityState === "visible") {
         this._armTodoResetTicker();
+        this._armWidgetsSyncPoller();
+      }
+    },
+
+    _isWidgetEditSessionActive() {
+      const active = document.activeElement;
+      if (!(active instanceof HTMLElement)) return false;
+      const isTextControl =
+        active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active.isContentEditable;
+      if (!isTextControl) return false;
+      return Boolean(active.closest(".dash-widget") || active.closest("[data-widget-id]"));
+    },
+
+    _cachePendingRemotePayload(payload) {
+      if (!payload) return;
+      if (!this._widgetsPendingRemotePayload) {
+        this._widgetsPendingRemotePayload = payload;
+        return;
+      }
+      const nextTs = payload.updatedAt || "";
+      const cachedTs = this._widgetsPendingRemotePayload.updatedAt || "";
+      const hasNextTs = nextTs.length > 0;
+      const hasCachedTs = cachedTs.length > 0;
+      if (!hasNextTs && !hasCachedTs) {
+        this._widgetsPendingRemotePayload = payload;
+        return;
+      }
+      if (hasNextTs && !hasCachedTs) {
+        this._widgetsPendingRemotePayload = payload;
+        return;
+      }
+      this._widgetsPendingRemotePayload =
+        compareUpdatedAt(nextTs, cachedTs) > 0 ? payload : this._widgetsPendingRemotePayload;
+    },
+
+    _applyPendingRemotePayload() {
+      if (!this._widgetsPendingRemotePayload) return;
+      if (this._widgetsNeedSync || this._widgetsSyncInFlight || this._isWidgetEditSessionActive()) return;
+      const payload = this._widgetsPendingRemotePayload;
+      this._widgetsPendingRemotePayload = null;
+
+      const localTs = this._widgetsUpdatedAt;
+      const hasRemoteTs =
+        typeof payload.updatedAt === "string" && Number.isFinite(new Date(payload.updatedAt).getTime());
+      const hasLocalTs =
+        typeof localTs === "string" && Number.isFinite(new Date(localTs).getTime());
+      const compare = hasRemoteTs && hasLocalTs ? compareUpdatedAt(payload.updatedAt, localTs) : 0;
+      const remoteLooksNewer =
+        !hasRemoteTs && !hasLocalTs ? true
+          : hasRemoteTs && hasLocalTs ? compare > 0
+            : hasRemoteTs && !hasLocalTs;
+      if (!remoteLooksNewer) return;
+
+      void this._reconcilePayloadLocally(payload, "deferred");
+    },
+
+    _armWidgetsSyncPoller() {
+      this._disarmWidgetsSyncPoller();
+      if (document.visibilityState !== "visible" || !this.online) return;
+      this._widgetsPollTimer = window.setInterval(() => {
+        void this.reconcileServerWidgets("poll");
+      }, WIDGET_SYNC_POLL_MS);
+    },
+
+    _disarmWidgetsSyncPoller() {
+      if (this._widgetsPollTimer != null) {
+        window.clearInterval(this._widgetsPollTimer);
+        this._widgetsPollTimer = null;
       }
     },
 
@@ -203,8 +351,190 @@ document.addEventListener("alpine:init", () => {
       saveSiteTitle(safe);
     },
 
-    persistWidgets() {
-      saveWidgets(this.widgets);
+    persistWidgetsDeferredSync() {
+      const updatedAt = saveWidgets(this.widgets, { updatedAt: new Date().toISOString() });
+      this._widgetsUpdatedAt = updatedAt;
+      this._widgetsNeedSync = true;
+      this.syncState = "pending";
+      if (this._widgetsSyncTimer) {
+        window.clearTimeout(this._widgetsSyncTimer);
+      }
+      this._widgetsSyncTimer = window.setTimeout(() => {
+        this._widgetsSyncTimer = null;
+        void this.syncToServer();
+      }, WIDGET_SYNC_DEBOUNCE_MS);
+    },
+
+    persistWidgets(options = {}) {
+      const doSync = options.sync !== false;
+      if (doSync) {
+        return this.persistWidgetsDeferredSync();
+      }
+      saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
+    },
+
+    get syncBannerText() {
+      return formatSyncMessage(
+        this.syncState,
+        this.online,
+        this._widgetsNeedSync,
+        this._widgetsSyncInFlight
+      );
+    },
+
+    _reconcilePayloadLocally(payload, trigger = "poll") {
+      if (!payload || !Array.isArray(payload.widgets)) {
+        if (trigger !== "visible") {
+          console.error("Invalid widgets payload from server", payload);
+        }
+        return;
+      }
+
+      const localTs = this._widgetsUpdatedAt;
+      const hasRemoteTs =
+        typeof payload.updatedAt === "string" && Number.isFinite(new Date(payload.updatedAt).getTime());
+      const hasLocalTs =
+        typeof localTs === "string" && Number.isFinite(new Date(localTs).getTime());
+      const compare = hasRemoteTs && hasLocalTs ? compareUpdatedAt(payload.updatedAt, localTs) : 0;
+      const remoteLooksNewer =
+        !hasRemoteTs && !hasLocalTs ? true
+          : hasRemoteTs && hasLocalTs ? compare > 0
+            : hasRemoteTs && !hasLocalTs;
+
+      if ((this._widgetsNeedSync || this._isWidgetEditSessionActive()) && remoteLooksNewer) {
+        this._cachePendingRemotePayload(payload);
+        return;
+      }
+
+      // Merge policy:
+      // - keep local when local is newer.
+      // - prefer remote when remote is newer or markers are absent.
+      if (hasRemoteTs && hasLocalTs && compare < 0) {
+        this._widgetsNeedSync = true;
+        this.syncState = "pending";
+        this.persistWidgets({ sync: true });
+        this.renderPageWidgets("home");
+        return;
+      }
+
+      if (hasRemoteTs && hasLocalTs && compare > 0) {
+        this.widgets = payload.widgets;
+        this._widgetsUpdatedAt = payload.updatedAt || this._widgetsUpdatedAt;
+        this._widgetsNeedSync = false;
+        this.persistWidgets({ sync: false });
+        this.renderPageWidgets("home");
+        this.syncState = "synced";
+        return;
+      }
+
+      if (!hasRemoteTs && hasLocalTs) {
+        this._widgetsNeedSync = true;
+        this.syncState = "pending";
+        this.persistWidgets({ sync: true });
+        this.renderPageWidgets("home");
+        return;
+      }
+
+      if (!hasRemoteTs || !hasLocalTs || compare >= 0) {
+        this.widgets = payload.widgets;
+        this._widgetsUpdatedAt = payload.updatedAt || this._widgetsUpdatedAt;
+        this._widgetsNeedSync = false;
+        this.persistWidgets({ sync: false });
+        this.renderPageWidgets("home");
+        this.syncState = "synced";
+        return;
+      }
+
+      this.syncState = payload.updatedAt ? "synced" : "unknown";
+    },
+
+    async reconcileServerWidgets(trigger = "init") {
+      if (!this.online) {
+        this.syncState = this._widgetsNeedSync ? "pending" : "offline";
+        return;
+      }
+
+      try {
+        const response = await fetch(WIDGETS_API_URL, {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          this.syncState = "error";
+          throw new Error(`GET ${WIDGETS_API_URL} failed: ${response.status}`);
+        }
+
+        const raw = await response.json();
+        const payload = loadWidgetPayloadFromApi(raw) || pickServerPayload(raw);
+        if (!payload || !Array.isArray(payload.widgets)) {
+          if (trigger !== "visible") {
+            console.error("Invalid widgets payload from server", raw);
+          }
+          return;
+        }
+
+        this._reconcilePayloadLocally(payload, trigger);
+        this._applyPendingRemotePayload();
+      } catch (error) {
+        if (trigger !== "visible") {
+          console.error("Widget sync fetch failed", error);
+        }
+        this.syncState = this._widgetsNeedSync ? "pending" : "error";
+      }
+    },
+
+    async syncToServer() {
+      if (!this.online) {
+        this.syncState = this._widgetsNeedSync ? "pending" : "offline";
+        return;
+      }
+
+      if (!this._widgetsNeedSync) {
+        this.syncState = this.syncState === "error" ? "error" : "synced";
+        return;
+      }
+
+      if (this._widgetsSyncInFlight) return;
+
+      const nextPayload = getWidgetPayloadForApi(this.widgets, { updatedAt: this._widgetsUpdatedAt });
+      this._widgetsSyncInFlight = true;
+      this.syncState = "syncing";
+      const controller = new AbortController();
+      this._widgetsSyncAbort = controller;
+
+      try {
+        const response = await fetch(WIDGETS_API_URL, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify(nextPayload),
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          this.syncState = "error";
+          throw new Error(`PUT ${WIDGETS_API_URL} failed: ${response.status}`);
+        }
+
+        this._widgetsNeedSync = false;
+        this.syncState = "synced";
+        const body = await response.json().catch(() => null);
+        const serverPayload = body ? loadWidgetPayloadFromApi(body) || pickServerPayload(body) : null;
+        if (serverPayload?.updatedAt) {
+          this._widgetsUpdatedAt = serverPayload.updatedAt;
+        }
+      } catch (error) {
+        if (error && error.name === "AbortError") return;
+        console.error("Widget sync save failed", error);
+        this.syncState = "error";
+      } finally {
+        this._widgetsSyncInFlight = false;
+        this._widgetsSyncAbort = null;
+        this._applyPendingRemotePayload();
+      }
+
     },
 
     normalizeWidgets() {
@@ -892,6 +1222,15 @@ document.addEventListener("alpine:init", () => {
         window.clearInterval(this._clockTicker);
         this._clockTicker = null;
       }
+      if (this._widgetsSyncTimer) {
+        window.clearTimeout(this._widgetsSyncTimer);
+        this._widgetsSyncTimer = null;
+      }
+      if (this._widgetsSyncAbort && this._widgetsSyncAbort.abort) {
+        this._widgetsSyncAbort.abort();
+        this._widgetsSyncAbort = null;
+      }
+      this._disarmWidgetsSyncPoller();
       this._disarmTodoResetTicker();
       if (this._onlineHandler) {
         window.removeEventListener("online", this._onlineHandler);

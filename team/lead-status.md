@@ -190,3 +190,59 @@ Per **`team/assignments-qa-remediation-v1.md`** (Definition of done and ordered 
 4. Pushed to `main` (`bd2e641..138ff13`).
 
 **Status:** Closed from static review perspective. Interactive verification on a real touch device recommended before client demo.
+
+---
+
+## Client direction ? Server-persisted widgets (2026-05-13)
+
+### Manager summary
+
+- Client requested that widget position/layout, type, and content survive across devices and server power cycles through backend persistence.
+- Scope is single-user LAN operation for now; backend can own the source-of-truth store and frontend can sync on load/save.
+- Backend route shape, merge policy, and conflict strategy remain to be finalized in this cycle (details below).
+
+### Assignment issued
+
+- **File-scoped task file:** `team/assignments-widget-persistence-server.md`
+- **Track priority:** High (blocking cross-device continuity and power-cycle recovery for dashboard state).
+- **Decision log:** prefer server-first state with local fallback when network/API is unavailable; pending conflict for this track:
+  - whether to implement strict `server-wins` semantics always, or `newest-updated` merge when both server and local payloads are present.
+
+### Next step
+
+After this track lands, QA must verify:
+- dashboard layout/content round trips across restart of the api service and browser/device reloads,
+- save failures + recovery behavior when `/api` is unavailable,
+- `/api/` remains excluded from service-worker caching and SW cache policy remains valid.
+
+### Execution status update (2026-05-13)
+
+- **Subagent execution:** Frontend and Backend tracks completed, QA pass requested.
+- **QA outcome:** `qa-engineer` reported **Pass with notes** (medium documentation drift noted for `data/schema.md` localStorage contract versus current runtime payload shape).
+- **Client-facing decision points:** confirm whether localStorage payload docs should be brought fully in line with runtime now (recommended before final client sign-off).
+- **Current next action:** Team Lead to fold interactive QA checks and any policy clarification into final wrap-up.
+
+## Client direction ? Live cross-surface sync (2026-05-13)
+
+### Manager summary (recorded decision)
+
+- Auth is **explicitly not required** for this dashboard; operation is single-user LAN only.
+- Keep `/api/widgets` open for LAN deployment and recovery.
+- User expectation: changes should propagate between open tabs/devices within approximately 3?5 seconds in normal conditions (where both are online).
+- Backend API route shape is suitable; polling/reconciliation is expected to be handled in Frontend first.
+
+### Delegation status
+
+- **Frontend:** `frontend-senior-dev` implemented visibility-aware polling + merge guards in `js/app.js`.
+- **QA:** `qa-engineer` assigned for interactive cross-tab consistency validation.
+- **Backend:** no code changes required unless Frontend requests conditional request optimization later.
+
+### Merge and replication policy for this cycle
+
+- Add a visible-only poll loop while online (default 3000?5000ms). When the tab is hidden, slow polling or temporarily pause to save LAN load and avoid churn.
+- Apply remote snapshot only if its `updatedAt` is newer than the last applied client snapshot.
+- Guard against clobbering local in-flight edits with a simple heuristic:
+  - set `hasPendingSync` true during save debounce / PUT in flight;
+  - track focus on editable widgets (contenteditable/inputs used for notes and todo edits);
+  - while either guard is active, defer remote pull.
+- After deferred pull conditions clear, fetch once and reconcile if remote remains newer.

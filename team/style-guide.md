@@ -85,6 +85,12 @@
 - Touch: minimum `42px` controls for mobile.
 - Add-widget control now uses a keyboard-operable combobox/listbox pattern: open/close with Enter/Space/Arrow keys and close/return focus on Escape.
 
+### Sync status indicator
+
+- The header status strip is non-blocking and uses `aria-live="polite"`.
+- It shows server sync state without interrupting editing (`offline`, `syncing`, `pending`, `error`), while the app keeps saving to `calvybots_widgets` locally.
+- Sync messaging is advisory; user input and rendering should remain available while network writes/retries are in progress.
+
 ## Motion
 
 - Default transition cap: `240ms`
@@ -147,4 +153,3 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 - While dragging tasks, all `.todo-list` elements participate as drop targets; insertion is driven by midpoint logic and visualized with `.dnd-task-placeholder` and `.is-list-drop-target`.
 - Pointer drag over state is reflected with `.dnd-over` and body suppression is handled via `body.dnd-active` (`user-select: none`, `touch-action: none`).
 - Mobile/touch: `touch-action: none` on drag handles (`.widget-handle`, `.todo-item-handle`), on drag ghosts (`.dnd-ghost-widget`, `.dnd-ghost-task`), and on `body.dnd-active` while a drag is in progress — so `.todo-list` and widget shells can scroll normally when not dragging.
-- Cross-widget task moves resolve the drop target from the shell (`.dash-widget`) plus a `destinationWidgetId` snapshot; when multiple lists overlap the pointer, the non-source list wins; `moveTask` refuses to write if the destination row cannot be resolved. After a full grid re-render, todo `destroy()` re-syncs from `config.todoState` before `syncCurrentWidget()` so a stale `items` array cannot overwrite another widget’s tasks in `localStorage`.

@@ -120,6 +120,40 @@ The API is mounted at `/api/*` and served via nginx reverse proxy.
 - Response: parsed JSON from `/app/../data/config.json`.
 - Error response (500): `{"error":"Failed to read config","detail":"..."}` when file read/parsing fails.
 
+### `GET /api/widgets`
+
+- Purpose: return persisted dashboard document from `../data/widgets.json` (relative to `api` service path).
+- Response: JSON object
+  - `schemaVersion`: integer (currently `1`)
+  - `updatedAt`: ISO-8601 timestamp string
+  - `widgets`: array of widget rows
+    - required per row:
+      - `id`: string
+      - `type`: string
+      - `position`: integer
+    - optional per row:
+      - `visible`, `title`, `minWidth`, `minHeight`, `width`, `height`
+      - `notesState` for `type: "notes"`
+      - `todoState` for `type: "todo"`
+- Error response (500): `{"error":"Failed to read widgets","detail":"..."}` when file read/parsing fails.
+
+### `PUT /api/widgets`
+
+- Purpose: replace the persisted dashboard document.
+- Request body: same object shape as `GET /api/widgets`.
+- Response:
+  - `200` with the stored object body (including refreshed `updatedAt`).
+- Payload validation:
+  - request body must be a JSON object
+  - `widgets` must be an array
+  - each row must include:
+    - `id` (string)
+    - `type` (string)
+    - `position` (integer)
+- Error response (400): `{"error":"Invalid payload","detail":"..."}`
+- Error response (413): `{"error":"Payload too large","detail":"Payload exceeded limit of ... bytes"}`
+- Error response (500): `{"error":"Failed to persist widgets","detail":"..."}`
+
 ### Unknown API routes
 
 - Any route not matching above under `/api/*` returns:

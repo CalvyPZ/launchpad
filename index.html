@@ -65,11 +65,10 @@
       role="status"
       aria-live="polite"
       class="border-b border-border bg-elevated px-5 py-2 text-center text-sm text-text-2"
-      x-show="!online"
+      x-show="syncBannerText"
       x-cloak
-    >
-      You are offline. This page is served from your device cache; reconnect for the latest updates and full styling.
-    </div>
+      x-text="syncBannerText"
+    ></div>
     <div class="app-shell min-h-screen flex flex-col">
 
       <!-- Header -->

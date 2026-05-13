@@ -8,6 +8,9 @@ const LEGACY_TODO_KEY = "calvybots_todo";
 
 const DEFAULT_MIN_WIDTH = 250;
 const DEFAULT_MIN_HEIGHT = 178;
+const WIDGETS_DOCUMENT_VERSION = 1;
+const SYNC_STATUS_SUCCESS = "success";
+const SYNC_STATUS_UNKNOWN = "unknown";
 
 /** Default task border / “none” swatch (style-guide `border`). */
 export const TODO_TASK_DEFAULT_COLOR = "#3d3d3d";
@@ -77,6 +80,37 @@ export function defaultTodoState() {
     weekday: 1,
     lastResetAt: null,
   };
+}
+
+function parseUpdatedAt(rawUpdatedAt) {
+  if (typeof rawUpdatedAt !== "string" || !rawUpdatedAt.trim()) return null;
+  const parsed = Date.parse(rawUpdatedAt);
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
+}
+
+function coerceWidgetsPayload(rawPayload) {
+  if (!rawPayload) return { widgetsRaw: null, updatedAt: null };
+  if (Array.isArray(rawPayload)) return { widgetsRaw: rawPayload, updatedAt: null };
+  if (typeof rawPayload !== "object") return { widgetsRaw: null, updatedAt: null };
+
+  const widgetsRaw = Array.isArray(rawPayload.widgets)
+    ? rawPayload.widgets
+    : Array.isArray(rawPayload.data?.widgets)
+    ? rawPayload.data.widgets
+    : null;
+  const updatedAt = parseUpdatedAt(
+    rawPayload.updatedAt || rawPayload.updated_at || rawPayload.lastUpdated
+  );
+
+  return { widgetsRaw, updatedAt };
+}
+
+export function normaliseWidgetRows(rawItems) {
+  const normalized = normalise(rawItems);
+  const migrated = migrateLegacyIfNeeded(normalized);
+  evaluateAllTodoResets(migrated);
+  return migrated;
 }
 
 const clampToNumber = (value, fallback) => {
@@ -381,60 +415,64 @@ function normaliseToolsRows(rawItems) {
 }
 
 export function loadWidgets() {
+  return loadWidgetsDocument().widgets;
+}
+
+export function loadWidgetsDocument() {
   try {
+    const fallback = normaliseWidgetRows(normalise(null));
     const stored = localStorage.getItem(WIDGETS_KEY);
     if (!stored) {
-      const fresh = normalise(null);
-      const migrated = migrateLegacyIfNeeded(fresh);
-      evaluateAllTodoResets(migrated);
-      return migrated;
+      return { widgets: fallback, updatedAt: null, syncStatus: SYNC_STATUS_UNKNOWN };
     }
+
     const parsed = JSON.parse(stored);
-    let widgets = normalise(parsed);
-    widgets = migrateLegacyIfNeeded(widgets);
-    evaluateAllTodoResets(widgets);
-    return widgets;
+    const payload = coerceWidgetsPayload(parsed);
+    return {
+      widgets: normaliseWidgetRows(payload.widgetsRaw),
+      updatedAt: payload.updatedAt,
+      syncStatus: payload.updatedAt ? SYNC_STATUS_SUCCESS : SYNC_STATUS_UNKNOWN,
+    };
   } catch (err) {
-    const fallback = normalise(null);
-    const migrated = migrateLegacyIfNeeded(fallback);
-    evaluateAllTodoResets(migrated);
-    return migrated;
+    console.error("Failed to load local widget payload", err);
+    return {
+      widgets: normaliseWidgetRows(normalise(null)),
+      updatedAt: null,
+      syncStatus: SYNC_STATUS_UNKNOWN,
+    };
   }
 }
 
-export function saveWidgets(widgets) {
-  const payload = (widgets || [])
-    .map((widget, index) => {
-      const row = {
-        id: widget.id,
-        type: widget.type,
-        position: index,
-        visible: widget.visible !== false,
-        title: typeof widget.title === "string" ? widget.title : "",
-        minWidth: clampToNumber(widget.minWidth, DEFAULT_MIN_WIDTH),
-        minHeight: clampToNumber(widget.minHeight, DEFAULT_MIN_HEIGHT),
-        width:
-          widget.width == null || widget.width === ""
-            ? null
-            : clampToNumber(widget.width, NaN),
-        height:
-          widget.height == null || widget.height === ""
-            ? null
-            : clampToNumber(widget.height, NaN),
-      };
-      if (row.width != null && Number.isNaN(row.width)) row.width = null;
-      if (row.height != null && Number.isNaN(row.height)) row.height = null;
-
-      if (widget.type === "notes") {
-        row.notesState = mergeNotesState(widget.notesState);
-      }
-      if (widget.type === "todo") {
-        row.todoState = mergeTodoState(widget.todoState);
-      }
-      return row;
+export function saveWidgets(widgets, options = {}) {
+  const payload = normaliseWidgetRows(widgets || []);
+  const updatedAt = parseUpdatedAt(options.updatedAt) || new Date().toISOString();
+  localStorage.setItem(
+    WIDGETS_KEY,
+    JSON.stringify({
+      version: WIDGETS_DOCUMENT_VERSION,
+      updatedAt,
+      widgets: payload,
     })
-    .sort((a, b) => a.position - b.position);
-  localStorage.setItem(WIDGETS_KEY, JSON.stringify(payload));
+  );
+  return updatedAt;
+}
+
+export function getWidgetPayloadForApi(widgets, options = {}) {
+  return {
+    version: WIDGETS_DOCUMENT_VERSION,
+    updatedAt: parseUpdatedAt(options.updatedAt) || new Date().toISOString(),
+    widgets: normaliseWidgetRows(widgets || []),
+  };
+}
+
+export function loadWidgetPayloadFromApi(raw) {
+  const payload = coerceWidgetsPayload(raw);
+  if (!payload.widgetsRaw) return null;
+  return {
+    version: (raw && raw.version) || WIDGETS_DOCUMENT_VERSION,
+    updatedAt: payload.updatedAt,
+    widgets: normaliseWidgetRows(payload.widgetsRaw),
+  };
 }
 
 export function loadToolsWidgets() {
