@@ -1,0 +1,88 @@
+---
+description: Visual design tokens, component patterns, and motion rules for CalvyBots. Apply when editing CSS, HTML templates, or widget UI.
+globs: ["css/**/*.css", "index.html", "js/widgets/**/*.js", "js/app.js"]
+alwaysApply: false
+---
+
+# Visual Design Rules — CalvyBots Launchpad (v4 direction)
+
+## Colour palette — cyan/dark
+
+These are the canonical tokens. Use them via Tailwind config extensions or CSS custom properties in `css/style.css`.
+
+| Token | Value | Use |
+|-------|-------|-----|
+| `bg` | `#1c1c1c` | Page background |
+| `surface` | `#242424` | Widget cards, major surfaces |
+| `elevated` | `#2e2e2e` | Raised controls, pills, dropdowns |
+| `border` | `#3d3d3d` | Separators, card edges |
+| **`accent`** | **`#2dd4bf`** | **Cyan — interactive highlight, focus, active states** |
+| `text-1` | `#f0f0f0` | Primary text |
+| `text-2` | `#9a9a9a` | Secondary/helper text |
+| `text-3` | `#5c5c5c` | Muted metadata |
+| `danger` | `#ff5c87` | Error, destructive action |
+| `success` | `#33dd9c` | Confirmation, success state |
+
+**No purple/violet in active UI states.** Any `.btn-*` rules in `css/style.css` that still use indigo or violet must be migrated to cyan variants when those selectors are touched.
+
+## Depth model
+
+- `body` uses ambient low-contrast gradient to avoid total flatness.
+- Widget cards: layered gradient fill + soft edge tint + slight lift on hover.
+- Hover state: border-lightening + `translateY(-1px)` lift at most.
+- Avoid heavy box-shadows or bloom effects; prefer `rgba` accent tints.
+- `backdrop-filter` and `blur` are acceptable sparingly for modal/overlay surfaces.
+
+## Component rules
+
+### Widget card (`.dash-widget`)
+- Gradient fill from `surface` to `bg` direction.
+- `border-radius: 0.75rem` (cards), `0.5rem` (controls).
+- Hover: subtle border-color brighten + small lift.
+- Resize handle visible only in edit mode, minimum 10×10px touch zone.
+
+### Buttons
+- Primary: cyan accent gradient, strong contrast text, `:focus-visible` cyan ring.
+- Secondary/soft: dark neutral gradient + border, same focus ring.
+- Destructive: `danger` colour only, never cyan.
+- All buttons: minimum **42px** height on mobile.
+
+### Inputs and textareas
+- Dark background (`elevated`), high-contrast `:focus-visible` outline in `accent`.
+- Placeholder text in `text-3` tone.
+- No unstyled browser defaults; always include explicit focus styles.
+
+### Widget title (`.widget-title`)
+- `0.72rem`, `font-weight: 600`, `letter-spacing: 0.08em`, all-caps.
+- Rendered **once** by the shell — never duplicated inside the widget renderer.
+
+## Typography
+
+- Page title (h1): `1.5–1.875rem`, weight 600, line-height 1.2.
+- Body: `1rem`, weight 400, line-height 1.45.
+- Caption/helper: `0.75rem`, muted text tone.
+- Font stack: Outfit → Inter → system sans-serif. Load via Google Fonts CDN.
+
+## Motion
+
+- Max transition duration: **240ms**.
+- Easing: `ease-out` only — no `ease-in`, no linear for UI transitions.
+- Entry fade/slide for new widget cards: 150–220ms.
+- Always add `@media (prefers-reduced-motion: reduce)` block that disables non-essential animations.
+
+## Accessibility
+
+- `:focus-visible` required on every interactive element; `:focus` (without visible) should be styled identically or suppressed only for pointer users.
+- Minimum touch target: **42×42px**.
+- Icon-only controls: `aria-label` required.
+- No duplicate widget titles in the DOM — shell renders title, widget body does not.
+- Color contrast: primary text on surface must meet WCAG AA (4.5:1 for normal text).
+- `aria-live="polite"` on the offline indicator strip.
+
+## Mobile / standalone
+
+- Single-column layout below `640px`.
+- `env(safe-area-inset-*)` padding in standalone PWA mode.
+- Sub-640px: disable widget body CSS resize to prevent scroll conflicts.
+- Touch targets above fold must be reachable one-handed.
+- Edit mode controls must remain accessible in portrait orientation.

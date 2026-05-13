@@ -1,0 +1,72 @@
+---
+description: PWA, service worker, and nginx hosting rules. Apply when editing sw.js, nginx-site.conf, manifest.json, or any file affecting installability.
+globs: ["sw.js", "nginx-site.conf", "nginx.conf", "manifest.json", "docker-compose.yml"]
+alwaysApply: false
+---
+
+# PWA and Hosting Rules — CalvyBots Launchpad
+
+## Online-first PWA policy
+
+The dashboard is a **Progressive Web App** with these runtime semantics:
+
+1. **Network-first for same-origin:** When online, the service worker fetches same-origin assets from the network, falling back to cache only on network failure. This keeps connected users on fresh assets.
+2. **Cache fallback for offline:** A precached shell (see below) allows the app to open when the network is unavailable.
+3. **CDN assets not cached:** Tailwind, Alpine, marked, DOMPurify — all from external CDNs — are not intercepted by the service worker. The app may degrade gracefully (no markdown preview) when offline.
+4. **`/api/` never cached:** All routes matching `/api/*` must bypass the service worker entirely and go direct to network. Do not add fetch interception for API routes.
+
+## Service worker (`sw.js`) rules
+
+- Cache name: `calvybots-v4` (increment version string when precache list changes).
+- **Precache list** (shell assets — must stay current):
+  - `/index.html`
+  - `/css/style.css`
+  - `/js/app.js`
+  - `/js/store.js`
+  - `/js/widgets/clock.js`
+  - `/js/widgets/notes.js`
+  - `/js/widgets/todo.js`
+  - `/manifest.json`
+  - `/icons/icon.svg`
+- On install: cache all precache URLs. On activate: delete old cache versions.
+- Fetch handler: network-first for same-origin, skip for `/api/` and cross-origin.
+- No `importScripts()` — SW must remain a single self-contained file.
+
+## manifest.json rules
+
+- `"display": "standalone"` — required for install prompt and bar-less launch.
+- `"start_url": "/"` with `"scope": "/"`.
+- `"theme_color"` and `"background_color"` must match the dark palette (`#1c1c1c` / `#121212`).
+- `"icons"`: include `icons/icon.svg` (any size). Add `icons/icon-192.png` and `icons/icon-512.png` when raster assets are available (needed for broadest Android install surface).
+- Keep the filename `manifest.json` — do NOT rename to `manifest.webmanifest` without updating `nginx-site.conf` MIME rules and the SW precache list simultaneously.
+
+## index.html PWA wiring
+
+- `<link rel="manifest" href="/manifest.json">` must be present in `<head>`.
+- `<meta name="apple-mobile-web-app-capable" content="yes">` — iOS standalone.
+- `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`.
+- SW registration script must register `/sw.js` (absolute path, not relative).
+
+## nginx-site.conf rules
+
+- Serve `sw.js` with `Cache-Control: no-store` so browsers always re-fetch the worker.
+- Serve `manifest.json` with `Content-Type: application/manifest+json`.
+- Static assets (JS, CSS, icons) may use long TTL (`Cache-Control: max-age=31536000`) if assets are cache-busted; otherwise use short TTL or `no-cache` for `index.html`.
+- gzip must be enabled for text MIME types (HTML, CSS, JS, JSON, SVG).
+- `/api/` proxy block must appear before the static catch-all `try_files` rule.
+- Do not serve the service worker with a `Service-Worker-Allowed` header unless scope expansion is required.
+
+## Security headers (recommended)
+
+When hardening, add these without breaking PWA:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: SAMEORIGIN`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- **Do not** add `Content-Security-Policy` headers that block CDN scripts (`cdn.tailwindcss.com`, `cdnjs.cloudflare.com`, `cdn.jsdelivr.net`) — the app relies on them.
+
+## Docker Compose
+
+- `web` service: nginx alpine, port `8033:80`, binds `/mnt/data/web_app` on the host.
+- `api` service: Node 20 alpine, internal port 3000, `npm install && node server.js`.
+- `server.js` is deployment-only and not tracked in the repo; `api/package-lock.json` is the only API artifact committed.
+- Do not add new services without Team Lead delegation.

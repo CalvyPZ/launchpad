@@ -1,0 +1,151 @@
+# CalvyBots Dashboard — Cursor Project Rules
+
+## Project identity
+
+Product name: **Launchpad** (CalvyBots personal quick-access dashboard).
+Repo root: `/workspace` (Cursor Cloud) / `n:/web_app` (host).
+Stack: **static-first** — HTML5 + Alpine.js CDN + Tailwind Play CDN + vanilla ES modules. No build step, no bundler, no TypeScript compilation.
+
+---
+
+## Non-negotiable constraints
+
+- **Never run Python scripts.** No `python`, `python3`, or `py` invocations. Avoid generating Python testing scripts.
+- **No automated test frameworks or test harnesses** unless the client explicitly requests them.
+- **No README files** unless explicitly requested.
+- **No bundlers, transpilers, or build steps** — ever. CDN-only dependencies.
+- **No `npm install`, `yarn`, or `pnpm`** for the main app. The `api/` service has its own package management but lives outside the delivered static tree.
+- **Never create standalone test scripts or unit test files** as part of feature work.
+
+---
+
+## Team structure and subagent roles
+
+Five Cursor agent personas are defined under `.cursor/agents/`. Respect these roles:
+
+| Agent | When to invoke |
+|-------|---------------|
+| `team-lead` | Sequencing work, delegation, authoring/updating `team/` docs, tightening acceptance criteria |
+| `frontend-senior-dev` | UI, widgets, `js/store.js`, `js/app.js`, `css/style.css`, `index.html`, edit mode, PWA frontend assets |
+| `backend-senior-dev` | `nginx-site.conf`, `sw.js`, MIME types, caching, security headers, `/api/` coexistence |
+| `qa-engineer` | Static review, usability checklists, PWA sign-off, `team/qa-*.md` and `tests/` artifacts |
+| `senior-cleanup-engineer` | **Client-only.** Do NOT invoke autonomously or proactively. Only when client personally requests by name. |
+
+**Model policy (all agents):** Default to **Codex 3.5 Spark preview** (`gpt-5.3-codex-spark-preview`). Escalate through Team Lead only; never self-select Opus without explicit client confirmation.
+
+---
+
+## Architecture rules
+
+### Static-first contract
+- All deliverables are **static files** served by nginx with no build step.
+- Entry point: `index.html` (Alpine.js `x-data="launchpad"` root).
+- Styles: Tailwind via **Play CDN** + `css/style.css` custom tokens.
+- Logic: vanilla ES modules in `js/` — `app.js`, `store.js`, `widget-registry.js`, `config-loader.js`, `event-bus.js`, and `js/widgets/*.js`.
+
+### Widget system
+- Widgets are **factory functions** imported in `js/app.js` (`widgetFactories` map).
+- Three **active** widget types: `clock`, `notes` (Sticky Notes), `todo` (To-Do).
+- Three **dormant** types kept for backward compat: `bookmarks`, `search`, `sysinfo` — must **not** appear in the Add Widget picker.
+- Each widget instance requires a **stable unique `id`** and **scoped** localStorage payload — no shared global key across instances.
+- Widget shells (title, controls) live in `app.js`/`index.html`, **not** inside widget renderers. Renderers must not duplicate the title.
+
+### localStorage schema
+Namespace: `calvybots_*`. Active keys:
+- `calvybots_widgets` — widget layout array with embedded per-instance state (`notesState`, `todoState`).
+- `calvybots_title` — dashboard site title string.
+- `calvybots_bookmarks` — bookmarks array (legacy widget, still migrated).
+- `calvybots_user_config` — user config overrides (for `config-loader.js`).
+
+Legacy keys `calvybots_notes` and `calvybots_todo` must be migrated via `migrateLegacyIfNeeded()` in `store.js` on first load — never silently dropped.
+
+### PWA and service worker
+- `sw.js` uses **network-first** strategy for same-origin GET requests.
+- Precache: `index.html`, `css/style.css`, `js/app.js`, `js/store.js`, widget modules, `manifest.json`, `icons/icon.svg`.
+- **`/api/` must never be intercepted or cached** by the service worker.
+- Cross-origin CDN requests (Tailwind, Alpine, marked, DOMPurify) are **not** cached — online-first CDN behavior.
+- `manifest.json` must be served with `application/manifest+json` MIME type.
+- `sw.js` must be served with `Cache-Control: no-store` so the browser always fetches it fresh.
+
+### nginx / backend
+- Primary config: `nginx-site.conf`.
+- API proxy: `/api/` → `http://api:3000`.
+- Static assets get appropriate `Cache-Control` (long TTL for hashed assets, short for `index.html`, `sw.js`, `manifest.json`).
+- Security headers must not break PWA install or SW scope.
+
+---
+
+## Visual design rules
+
+### Palette — cyan/dark (v4 direction)
+- Page background: `#1c1c1c` (charcoal).
+- Surface / cards: `#242424`.
+- Elevated controls: `#2e2e2e`.
+- Border: `#3d3d3d`.
+- **Primary accent: `#2dd4bf` (cyan)** — use for interactive highlights, focus rings, active states.
+- Primary text: `#f0f0f0`.
+- Secondary text: `#9a9a9a`.
+- Muted/metadata: `#5c5c5c`.
+
+**No stray purple in active UI states.** The CSS still has some violet/indigo in `.btn-*` rules — these should be migrated to cyan variants when touched.
+
+### Component patterns
+- Widget card (`.dash-widget`): gradient fill, soft border, lift on hover.
+- Buttons: dark neutral gradient with border; accent gradient for primary actions.
+- Inputs: dark background, high-contrast `:focus-visible` ring.
+- Motion cap: **240ms**, `ease-out` only; respect `prefers-reduced-motion`.
+- Touch targets: minimum **42px** for all interactive controls.
+
+### Typography
+- Headline `h1`: `1.5–1.875rem`, `font-weight: 600`.
+- Widget title (`.widget-title`): `0.72rem`, `font-weight: 600`, all-caps, tracked.
+- Body: `1rem`, `font-weight: 400`, `line-height: 1.45`.
+- Caption: `0.75rem`, muted text.
+
+---
+
+## Code quality rules
+
+- **No unsanitized `innerHTML` from user content.** Notes Markdown must pass through DOMPurify (or equivalent safe renderer) before insertion.
+- **No duplicate widget titles** — shell renders the title once; widget renderer must not add its own title block.
+- **Keyboard accessibility:** all controls reachable via keyboard, visible `:focus-visible` on every interactive element.
+- **Icon-only controls** must have `aria-label`.
+- **Accessible names** required on all form controls.
+- Use `structuredClone` (with JSON fallback) for deep copies — never mutate shared objects.
+- `async`/`await` error paths must not silently swallow failures; log with `console.error`.
+- Imports use relative paths (`./widgets/clock.js`), not bare specifiers.
+
+---
+
+## Process and documentation rules
+
+- **Source of truth for product direction:** `team/brief.md`, `team/delegation-v4.md`, `team/lead-status.md`.
+- **Style tokens source of truth:** `team/style-guide.md` (currently v3; update to v4 when cyan token pass is complete).
+- **QA sign-off artifacts:** `team/qa-complete-v4.md`, `team/qa-status.md`, `tests/test-plan.md`, `tests/usability-checklist.md`.
+- When introducing new interaction patterns (resize handles, recurrence controls, markdown toolbar), update `team/style-guide.md`.
+- Dated architecture amendments go in `team/brief.md` under `## Update YYYY-MM-DD`.
+- **No PRs expected for internal dev sprints** (see `team/brief.md §8`); git commits sufficient.
+- Team Lead must update `team/lead-status.md` and assignment files after each delegation cycle.
+
+---
+
+## File ownership quick reference
+
+| File / folder | Owner agent |
+|---------------|-------------|
+| `index.html` | Frontend |
+| `css/style.css` | Frontend |
+| `js/app.js` | Frontend |
+| `js/store.js` | Frontend |
+| `js/widgets/*.js` | Frontend |
+| `js/config-loader.js` | Frontend / Backend |
+| `js/widget-registry.js` | Frontend |
+| `js/event-bus.js` | Frontend |
+| `sw.js` | Backend |
+| `nginx-site.conf`, `nginx.conf` | Backend |
+| `manifest.json` | Backend / Frontend (joint) |
+| `docker-compose.yml` | Backend |
+| `data/config.json`, `data/schema.md` | Backend / Frontend (joint) |
+| `team/*.md` | Team Lead (or delegated agent) |
+| `tests/*.md` | QA |
+| `.cursor/agents/*.md` | Team Lead |
