@@ -19,6 +19,8 @@ function librariesMissingMessage(dashboard) {
   return "<p class=\"notes-md-fallback\">Markdown preview libraries are still loading. If this message stays, check your network or ad blocker, or switch to <strong>Source only</strong>.</p>";
 }
 
+const NOTES_PERSIST_DEBOUNCE_MS = 250;
+
 async function renderMarkdownToSafeHtml(src, dashboard) {
   const marked = getMarked();
   const DOMPurify = getPurify();
@@ -122,7 +124,7 @@ export function render(container, context) {
     if (timer) window.clearTimeout(timer);
     timer = window.setTimeout(() => {
       persist();
-    }, 350);
+    }, NOTES_PERSIST_DEBOUNCE_MS);
   };
 
   textarea.addEventListener("input", onInput);

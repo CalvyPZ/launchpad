@@ -25,8 +25,9 @@ const widgetFactories = {
 };
 const widgetTypeSet = new Set(widgetTypes);
 const WIDGETS_API_URL = "/api/widgets";
-const WIDGET_SYNC_DEBOUNCE_MS = 900;
+const WIDGET_SYNC_DEBOUNCE_MS = 350;
 const WIDGET_SYNC_POLL_MS = 4000;
+const WIDGET_SYNC_PUSH_MS = 3000;
 
 function compareUpdatedAt(leftTs, rightTs) {
   const left = leftTs ? new Date(leftTs).getTime() : NaN;
@@ -42,13 +43,23 @@ function compareUpdatedAt(leftTs, rightTs) {
 function pickServerPayload(raw) {
   if (!raw) return null;
   if (Array.isArray(raw)) {
-    return { version: 1, updatedAt: null, widgets: normaliseWidgetRows(raw) };
+    return {
+      version: 1,
+      updatedAt: null,
+      widgets: normaliseWidgetRows(raw),
+      toolsWidgets: null,
+    };
   }
   if (Array.isArray(raw.widgets)) {
     return {
       version: raw.version || 1,
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
       widgets: normaliseWidgetRows(raw.widgets),
+      toolsWidgets: Array.isArray(raw.toolsWidgets)
+        ? normaliseToolsRows(raw.toolsWidgets)
+        : Array.isArray(raw.data?.toolsWidgets)
+        ? normaliseToolsRows(raw.data.toolsWidgets)
+        : null,
     };
   }
   if (Array.isArray(raw.data?.widgets)) {
@@ -56,18 +67,32 @@ function pickServerPayload(raw) {
       version: raw.version || 1,
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
       widgets: normaliseWidgetRows(raw.data.widgets),
+      toolsWidgets: Array.isArray(raw.toolsWidgets)
+        ? normaliseToolsRows(raw.toolsWidgets)
+        : Array.isArray(raw.data?.toolsWidgets)
+        ? normaliseToolsRows(raw.data.toolsWidgets)
+        : null,
+    };
+  }
+  if (Array.isArray(raw.toolsWidgets)) {
+    return {
+      version: raw.version || 1,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+      widgets: null,
+      toolsWidgets: normaliseToolsRows(raw.toolsWidgets),
+    };
+  }
+  if (Array.isArray(raw.data?.toolsWidgets)) {
+    return {
+      version: raw.version || 1,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+      widgets: null,
+      toolsWidgets: normaliseToolsRows(raw.data.toolsWidgets),
     };
   }
   return null;
 }
 
-function formatSyncMessage(syncState, online, hasPendingSync, isSyncing) {
-  if (isSyncing) return "Syncing widgets…";
-  if (!online) return "Offline: dashboard changes are saved locally and will sync when online.";
-  if (hasPendingSync) return "Saving changes to server…";
-  if (syncState === "error") return "Last sync failed. Changes are preserved locally and will retry.";
-  return "";
-}
 const addWidgetChoices = [
   { type: "clock", label: "Clock", icon: "🕐" },
   { type: "notes", label: "Sticky Notes", icon: "📝" },
@@ -146,8 +171,8 @@ document.addEventListener("alpine:init", () => {
     currentPage: "home",
     clockTitle: "",
     online: typeof navigator !== "undefined" ? navigator.onLine : true,
-    syncState: "unknown",
     _widgetsSyncTimer: null,
+    _widgetsSyncPushTimer: null,
     _widgetsSyncInFlight: false,
     _widgetsSyncAbort: null,
     _widgetsNeedSync: false,
@@ -163,6 +188,9 @@ document.addEventListener("alpine:init", () => {
     _onlineHandler: null,
     _offlineHandler: null,
     _visibilityHandler: null,
+    _pagehideHandler: null,
+    _beforeUnloadHandler: null,
+    _isExiting: false,
 
     navigateTo(page) {
       const next = page === "tools" ? "tools" : "home";
@@ -170,8 +198,14 @@ document.addEventListener("alpine:init", () => {
       this.closeAddWidgetPicker(false);
     },
 
-    persistToolsWidgets() {
+    persistToolsWidgets(options = {}) {
       saveToolsWidgets(this.toolsWidgets);
+      const shouldSync = options.sync !== false;
+      if (!shouldSync) {
+        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
+        return;
+      }
+      this.persistWidgetsDeferredSync();
     },
 
     init() {
@@ -179,29 +213,37 @@ document.addEventListener("alpine:init", () => {
       this.toolsGridEl = this.$refs?.toolsGrid || document.getElementById("tools-grid");
       this._onlineHandler = () => {
         this.online = true;
-        this.syncState = "online";
         if (this._widgetsNeedSync) {
           void this.syncToServer();
           this._armWidgetsSyncPoller();
+          this._armWidgetsSyncPushTimer();
           return;
         }
         void this.reconcileServerWidgets("online");
         this._applyPendingRemotePayload();
         this._armWidgetsSyncPoller();
+        this._armWidgetsSyncPushTimer();
       };
       this._offlineHandler = () => {
         this.online = false;
-        this.syncState = "offline";
         this._disarmWidgetsSyncPoller();
+        this._disarmWidgetsSyncPushTimer();
+      };
+      this._pagehideHandler = () => {
+        this.flushWidgetsBeforeExit("pagehide");
+      };
+      this._beforeUnloadHandler = () => {
+        this.flushWidgetsBeforeExit("beforeunload");
       };
       window.addEventListener("online", this._onlineHandler);
       window.addEventListener("offline", this._offlineHandler);
+      window.addEventListener("pagehide", this._pagehideHandler);
+      window.addEventListener("beforeunload", this._beforeUnloadHandler);
       this.refreshClock();
 
       const localDocument = loadWidgetsDocument();
       this.widgets = localDocument.widgets;
       this._widgetsUpdatedAt = localDocument.updatedAt;
-      this.syncState = localDocument.updatedAt ? "local" : "unknown";
 
       this.toolsWidgets = loadToolsWidgets();
       this._visibilityHandler = () => {
@@ -218,28 +260,32 @@ document.addEventListener("alpine:init", () => {
           if (this._widgetsNeedSync && this.online) {
             void this.syncToServer();
             this._armWidgetsSyncPoller();
+            this._armWidgetsSyncPushTimer();
             return;
           }
           this._applyPendingRemotePayload();
           void this.reconcileServerWidgets("visible");
           this._armTodoResetTicker();
           this._armWidgetsSyncPoller();
+          this._armWidgetsSyncPushTimer();
         } else {
           this._disarmWidgetsSyncPoller();
           this._disarmTodoResetTicker();
+          this._disarmWidgetsSyncPushTimer();
         }
       };
       document.addEventListener("visibilitychange", this._visibilityHandler);
       this.renderPageWidgets("home");
       this.renderPageWidgets("tools");
       this.persistWidgets({ sync: false });
-      this.persistToolsWidgets();
+      this.persistToolsWidgets({ sync: false });
       if (this._clockTicker) window.clearInterval(this._clockTicker);
       this._clockTicker = window.setInterval(() => this.refreshClock(), 1000);
       void this.reconcileServerWidgets("init");
       if (document.visibilityState === "visible") {
         this._armTodoResetTicker();
         this._armWidgetsSyncPoller();
+        this._armWidgetsSyncPushTimer();
       }
     },
 
@@ -303,10 +349,26 @@ document.addEventListener("alpine:init", () => {
       }, WIDGET_SYNC_POLL_MS);
     },
 
+    _armWidgetsSyncPushTimer() {
+      this._disarmWidgetsSyncPushTimer();
+      if (document.visibilityState !== "visible" || !this.online) return;
+      this._widgetsSyncPushTimer = window.setInterval(() => {
+        if (!this._widgetsNeedSync) return;
+        void this.syncToServer();
+      }, WIDGET_SYNC_PUSH_MS);
+    },
+
     _disarmWidgetsSyncPoller() {
       if (this._widgetsPollTimer != null) {
         window.clearInterval(this._widgetsPollTimer);
         this._widgetsPollTimer = null;
+      }
+    },
+
+    _disarmWidgetsSyncPushTimer() {
+      if (this._widgetsSyncPushTimer != null) {
+        window.clearInterval(this._widgetsSyncPushTimer);
+        this._widgetsSyncPushTimer = null;
       }
     },
 
@@ -355,7 +417,6 @@ document.addEventListener("alpine:init", () => {
       const updatedAt = saveWidgets(this.widgets, { updatedAt: new Date().toISOString() });
       this._widgetsUpdatedAt = updatedAt;
       this._widgetsNeedSync = true;
-      this.syncState = "pending";
       if (this._widgetsSyncTimer) {
         window.clearTimeout(this._widgetsSyncTimer);
       }
@@ -363,6 +424,28 @@ document.addEventListener("alpine:init", () => {
         this._widgetsSyncTimer = null;
         void this.syncToServer();
       }, WIDGET_SYNC_DEBOUNCE_MS);
+    },
+
+    flushWidgetsBeforeExit(_reason = "pageexit") {
+      if (this._isExiting) {
+        return;
+      }
+      this._isExiting = true;
+      if (this._widgetsSyncTimer != null) {
+        window.clearTimeout(this._widgetsSyncTimer);
+        this._widgetsSyncTimer = null;
+      }
+      this._disarmWidgetsSyncPoller();
+      this._disarmWidgetsSyncPushTimer();
+      this._widgetsNeedSync = true;
+      this._widgetsUpdatedAt = saveWidgets(this.widgets, {
+        updatedAt: this._widgetsUpdatedAt || new Date().toISOString(),
+      });
+      saveToolsWidgets(this.toolsWidgets);
+      if (!this.online) {
+        return;
+      }
+      void this.syncToServer({ keepalive: true, source: _reason });
     },
 
     persistWidgets(options = {}) {
@@ -373,17 +456,10 @@ document.addEventListener("alpine:init", () => {
       saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
     },
 
-    get syncBannerText() {
-      return formatSyncMessage(
-        this.syncState,
-        this.online,
-        this._widgetsNeedSync,
-        this._widgetsSyncInFlight
-      );
-    },
-
     _reconcilePayloadLocally(payload, trigger = "poll") {
-      if (!payload || !Array.isArray(payload.widgets)) {
+      const remoteWidgets = Array.isArray(payload?.widgets) ? payload.widgets : null;
+      const remoteToolsWidgets = Array.isArray(payload?.toolsWidgets) ? payload.toolsWidgets : null;
+      if (!remoteWidgets && !remoteToolsWidgets) {
         if (trigger !== "visible") {
           console.error("Invalid widgets payload from server", payload);
         }
@@ -409,48 +485,41 @@ document.addEventListener("alpine:init", () => {
       // Merge policy:
       // - keep local when local is newer.
       // - prefer remote when remote is newer or markers are absent.
-      if (hasRemoteTs && hasLocalTs && compare < 0) {
-        this._widgetsNeedSync = true;
-        this.syncState = "pending";
-        this.persistWidgets({ sync: true });
-        this.renderPageWidgets("home");
-        return;
-      }
-
-      if (hasRemoteTs && hasLocalTs && compare > 0) {
-        this.widgets = payload.widgets;
+      const applyRemotePayload = () => {
+        if (remoteWidgets) this.widgets = remoteWidgets;
+        if (remoteToolsWidgets) this.toolsWidgets = remoteToolsWidgets;
+        evaluateAllTodoResets(this.widgets);
+        evaluateAllTodoResets(this.toolsWidgets);
         this._widgetsUpdatedAt = payload.updatedAt || this._widgetsUpdatedAt;
         this._widgetsNeedSync = false;
         this.persistWidgets({ sync: false });
+        this.persistToolsWidgets({ sync: false });
         this.renderPageWidgets("home");
-        this.syncState = "synced";
+        this.renderPageWidgets("tools");
+      };
+
+      if (hasRemoteTs && hasLocalTs && compare < 0) {
+        this._widgetsNeedSync = true;
+        this.persistWidgets({ sync: true });
+        this.persistToolsWidgets({ sync: true });
+        this.renderPageWidgets("home");
+        this.renderPageWidgets("tools");
         return;
       }
 
-      if (!hasRemoteTs && hasLocalTs) {
-        this._widgetsNeedSync = true;
-        this.syncState = "pending";
-        this.persistWidgets({ sync: true });
-        this.renderPageWidgets("home");
+      if (remoteLooksNewer) {
+        applyRemotePayload();
         return;
       }
 
       if (!hasRemoteTs || !hasLocalTs || compare >= 0) {
-        this.widgets = payload.widgets;
-        this._widgetsUpdatedAt = payload.updatedAt || this._widgetsUpdatedAt;
-        this._widgetsNeedSync = false;
-        this.persistWidgets({ sync: false });
-        this.renderPageWidgets("home");
-        this.syncState = "synced";
+        applyRemotePayload();
         return;
       }
-
-      this.syncState = payload.updatedAt ? "synced" : "unknown";
     },
 
     async reconcileServerWidgets(trigger = "init") {
       if (!this.online) {
-        this.syncState = this._widgetsNeedSync ? "pending" : "offline";
         return;
       }
 
@@ -461,7 +530,6 @@ document.addEventListener("alpine:init", () => {
           cache: "no-store",
         });
         if (!response.ok) {
-          this.syncState = "error";
           throw new Error(`GET ${WIDGETS_API_URL} failed: ${response.status}`);
         }
 
@@ -480,46 +548,74 @@ document.addEventListener("alpine:init", () => {
         if (trigger !== "visible") {
           console.error("Widget sync fetch failed", error);
         }
-        this.syncState = this._widgetsNeedSync ? "pending" : "error";
       }
     },
 
-    async syncToServer() {
+    async syncToServer(options = {}) {
+      const useKeepalive = options.keepalive === true;
+      const keepaliveSource = options.source || "manual";
       if (!this.online) {
-        this.syncState = this._widgetsNeedSync ? "pending" : "offline";
         return;
       }
 
       if (!this._widgetsNeedSync) {
-        this.syncState = this.syncState === "error" ? "error" : "synced";
         return;
       }
 
       if (this._widgetsSyncInFlight) return;
 
-      const nextPayload = getWidgetPayloadForApi(this.widgets, { updatedAt: this._widgetsUpdatedAt });
+      const nextPayload = getWidgetPayloadForApi(this.widgets, {
+        updatedAt: this._widgetsUpdatedAt,
+        toolsWidgets: this.toolsWidgets,
+      });
+      const serializedPayload = JSON.stringify(nextPayload);
       this._widgetsSyncInFlight = true;
-      this.syncState = "syncing";
-      const controller = new AbortController();
-      this._widgetsSyncAbort = controller;
+      const controller = useKeepalive ? null : new AbortController();
+      if (controller) {
+        this._widgetsSyncAbort = controller;
+      }
 
       try {
-        const response = await fetch(WIDGETS_API_URL, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-          },
-          body: JSON.stringify(nextPayload),
-          signal: controller.signal,
-        });
+        let response;
+        try {
+          response = await fetch(WIDGETS_API_URL, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+            },
+            body: serializedPayload,
+            ...(controller ? { signal: controller.signal } : {}),
+            ...(useKeepalive ? { keepalive: true } : {}),
+          });
+        } catch (error) {
+          if (error && error.name === "AbortError") return;
+          if (useKeepalive && typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+            let beaconSent = false;
+            try {
+              beaconSent = navigator.sendBeacon(
+                WIDGETS_API_URL,
+                new Blob([serializedPayload], { type: "application/json" })
+              );
+            } catch (beaconError) {
+              console.error("Widget sync beacon failed", beaconError);
+            }
+            if (beaconSent) {
+              this._widgetsNeedSync = false;
+              this._widgetsUpdatedAt = nextPayload.updatedAt || this._widgetsUpdatedAt;
+              return;
+            }
+            if (useKeepalive) {
+              console.error(`Widget sync keepalive/ beacon fallback failed from ${keepaliveSource}`);
+            }
+          }
+          throw error;
+        }
         if (!response.ok) {
-          this.syncState = "error";
           throw new Error(`PUT ${WIDGETS_API_URL} failed: ${response.status}`);
         }
 
         this._widgetsNeedSync = false;
-        this.syncState = "synced";
         const body = await response.json().catch(() => null);
         const serverPayload = body ? loadWidgetPayloadFromApi(body) || pickServerPayload(body) : null;
         if (serverPayload?.updatedAt) {
@@ -528,7 +624,6 @@ document.addEventListener("alpine:init", () => {
       } catch (error) {
         if (error && error.name === "AbortError") return;
         console.error("Widget sync save failed", error);
-        this.syncState = "error";
       } finally {
         this._widgetsSyncInFlight = false;
         this._widgetsSyncAbort = null;
@@ -1231,12 +1326,19 @@ document.addEventListener("alpine:init", () => {
         this._widgetsSyncAbort = null;
       }
       this._disarmWidgetsSyncPoller();
+      this._disarmWidgetsSyncPushTimer();
       this._disarmTodoResetTicker();
       if (this._onlineHandler) {
         window.removeEventListener("online", this._onlineHandler);
       }
       if (this._offlineHandler) {
         window.removeEventListener("offline", this._offlineHandler);
+      }
+      if (this._pagehideHandler) {
+        window.removeEventListener("pagehide", this._pagehideHandler);
+      }
+      if (this._beforeUnloadHandler) {
+        window.removeEventListener("beforeunload", this._beforeUnloadHandler);
       }
       if (this._visibilityHandler) {
         document.removeEventListener("visibilitychange", this._visibilityHandler);
