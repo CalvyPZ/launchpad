@@ -2,6 +2,18 @@
 
 Date: 2026-05-13
 
+### Client direction ? Remove dormant widget types entirely (2026-05-13)
+
+**Status:** Delegated (Frontend + Backend parallel); QA after landing.
+
+**Priority:** P1 (product hygiene + persistence consistency).
+
+**Scope:** Drop `bookmarks`, `search`, and `sysinfo` home widget rows on normalisation; delete `js/widgets/{bookmarks,search,sysinfo}.js`; align `removeDeprecatedHomeWidgets` / sync paths with store; mirror stripping in `api/server.js`; refresh `.cursor/rules`, `tests/test-plan.md`, `data/schema.md`, `data/config.json`, `team/delegation-v4.md`, `team/brief.md` update section; optional orphaned legacy key cleanup only if confirmed unused.
+
+**Assignment:** `team/assignments-remove-dormant-widgets.md`
+
+**Constraints:** Static-first; preserve notes/todo (and tools) data; do **not** delete QA verdict sections in historical markdown; append/archive per conventions only via cleanup engineer if ever tasked.
+
 ### Client direction ? Service worker diagnostics false-positive (2026-05-13)
 
 **Status:** Closed from Team Lead.

@@ -205,3 +205,15 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 - Console integration captures `warn` and `error` only (not `console.log`) with recursion guard and routes to diagnostics log only.
 - Probe writes and console capture are append-only; manual refresh and automatic visibility/poll refresh are available for Status.
 - **Widget server sync** — two extra Status rows (merged after static probes): **Widgets GET (retrieve)** for the initial `/api/widgets` load, and **Widgets PUT (push)** for live outbound state (idle / debounced / in flight / offline queue / last failure). `js/app.js` calls `reportWidgetSyncRetrieve`, `reportWidgetSyncPushFromDashboard`, and `reportWidgetSyncPushEvent`; structured **info** log lines mark GET/PUT milestones, while existing `console.error` / `console.warn` on sync failures still flow through the Log via console hooks.
+
+## Tools debug widget (Fortnight calculator)
+
+- Added on Debug page tools track (`toolsWidgets`) via `js/widgets/fortnight-tools.js`; widget rows keep per-instance settings in `widgetRow.fortnightState`.
+- Inputs in the widget: FN start date, line number at FN start, rotate-from, rotate-to, and target date.
+- Output sentence format is fixed: `On {Date} you will be on line {line number}`.
+- Line progression: count Sundays after FN start through target date, then advance by +1 every second Sunday (`Math.floor(sundayCount / 2)`), wrapping to the configured range.
+- Storage and UX: all fields persist in the row, and target date can be changed directly without re-entering other values.
+- Edge handling documented in implementation:
+  - rotate-from / rotate-to is normalized by swap when out of order;
+  - target date before FN start returns the configured start-line;
+  - line-at-start is clamped into the rotation range.

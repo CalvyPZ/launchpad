@@ -9,6 +9,7 @@ import {
   saveSiteTitle,
   defaultNotesState,
   defaultTodoState,
+  defaultFortnightState,
   evaluateAllTodoResets,
   getWidgetPayloadForApi,
   loadWidgetPayloadFromApi,
@@ -19,6 +20,7 @@ import {
 import * as notesWidget from "./widgets/notes.js";
 import * as todoWidget from "./widgets/todo.js";
 import * as placeholderWidget from "./widgets/placeholder.js";
+import * as fortnightToolsWidget from "./widgets/fortnight-tools.js";
 import * as statusToolsWidget from "./widgets/status-tools.js";
 import * as logToolsWidget from "./widgets/log-tools.js";
 import {
@@ -108,16 +110,18 @@ const addWidgetChoices = [
   { type: "todo", label: "To-Do", icon: "✅" },
 ];
 
-const toolsWidgetTypes = ["status-tools", "log-tools", "placeholder"];
+const toolsWidgetTypes = ["status-tools", "log-tools", "placeholder", "fortnight"];
 const toolsWidgetFactories = {
   "status-tools": statusToolsWidget.render,
   "log-tools": logToolsWidget.render,
   placeholder: placeholderWidget.render,
+  fortnight: fortnightToolsWidget.render,
 };
 const toolsWidgetTypeSet = new Set(toolsWidgetTypes);
 const toolsAddWidgetChoices = [
   { type: "status-tools", label: "Status", icon: "📡" },
   { type: "log-tools", label: "Log", icon: "📋" },
+  { type: "fortnight", label: "Fortnight", icon: "📆" },
 ];
 
 const widgetLabels = {
@@ -125,6 +129,7 @@ const widgetLabels = {
   todo: "To-Do",
   "status-tools": "Status",
   "log-tools": "Log",
+  fortnight: "Fortnight",
   placeholder: "Placeholder",
 };
 
@@ -1584,6 +1589,7 @@ document.addEventListener("alpine:init", () => {
           width: null,
           height: null,
         };
+        if (type === "fortnight") next.fortnightState = defaultFortnightState();
         this.toolsWidgets = [...this.toolsWidgets, next];
         this.persistToolsWidgets();
         this.renderPageWidgets("debug");
@@ -1606,6 +1612,7 @@ document.addEventListener("alpine:init", () => {
         };
         if (type === "notes") next.notesState = defaultNotesState();
         if (type === "todo") next.todoState = defaultTodoState();
+        if (type === "fortnight") next.fortnightState = defaultFortnightState();
         this.widgets = migrateLegacyIfNeeded([...this.widgets, next]);
         this.persistWidgets();
         this.renderPageWidgets("home");

@@ -86,7 +86,7 @@ const DEFAULT_TOOLS_WIDGETS = [
 const DEFAULT_TOOLS_TAB_WIDGETS = [
   { id: TOOLS_TAB_PLACEHOLDER_ID, type: "placeholder", position: 0 },
 ];
-const TOOL_WIDGET_TYPES = new Set(["status-tools", "log-tools", "placeholder"]);
+const TOOL_WIDGET_TYPES = new Set(["status-tools", "log-tools", "placeholder", "fortnight"]);
 
 function readStorageValue(key) {
   try {
@@ -177,6 +177,17 @@ export function defaultTodoState() {
   };
 }
 
+export function defaultFortnightState() {
+  const today = toDateInputString();
+  return {
+    fnStartDate: today,
+    lineAtStart: 1,
+    rotateFrom: 1,
+    rotateTo: 12,
+    targetDate: today,
+  };
+}
+
 function parseUpdatedAt(rawUpdatedAt) {
   if (typeof rawUpdatedAt !== "string" || !rawUpdatedAt.trim()) return null;
   const parsed = Date.parse(rawUpdatedAt);
@@ -218,6 +229,36 @@ const clampToNumber = (value, fallback) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+
+function toDateInputString(date = new Date()) {
+  const d = new Date(date);
+  if (!Number.isFinite(d.getTime())) return "";
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+function clampRange(value, lower, upper) {
+  const min = Number.isFinite(lower) ? lower : Number.NEGATIVE_INFINITY;
+  const max = Number.isFinite(upper) ? upper : Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(value)) return min;
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+function normalizeFortnightDate(rawDate, fallbackDate) {
+  if (typeof rawDate !== "string") return fallbackDate;
+  const value = rawDate.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return fallbackDate;
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? fallbackDate : value;
+}
+
+function normalizeFortnightInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
 
 function parseTimeParts(timeLocal) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(timeLocal || "").trim());
@@ -326,6 +367,27 @@ function mergeTodoState(raw) {
     timeLocal: typeof raw.timeLocal === "string" ? raw.timeLocal : base.timeLocal,
     weekday: clampToNumber(raw.weekday, base.weekday),
     lastResetAt: raw.lastResetAt == null ? null : String(raw.lastResetAt),
+  };
+}
+
+function mergeFortnightState(raw) {
+  const base = defaultFortnightState();
+  if (!raw || typeof raw !== "object") return base;
+  const rotateFrom = normalizeFortnightInt(raw.rotateFrom, base.rotateFrom);
+  const rotateTo = normalizeFortnightInt(raw.rotateTo, base.rotateTo);
+  const normalizedRotateFrom = Number.isFinite(rotateFrom) ? rotateFrom : base.rotateFrom;
+  const normalizedRotateTo = Number.isFinite(rotateTo) ? rotateTo : base.rotateTo;
+  const orderedFrom = normalizedRotateFrom > normalizedRotateTo ? normalizedRotateTo : normalizedRotateFrom;
+  const orderedTo = normalizedRotateFrom > normalizedRotateTo ? normalizedRotateFrom : normalizedRotateTo;
+  const safeStartDate = normalizeFortnightDate(raw.fnStartDate, base.fnStartDate);
+  const safeTargetDate = normalizeFortnightDate(raw.targetDate, safeStartDate);
+  const lineAtStart = normalizeFortnightInt(raw.lineAtStart, base.lineAtStart);
+  return {
+    fnStartDate: safeStartDate,
+    lineAtStart: clampRange(lineAtStart, orderedFrom, orderedTo),
+    rotateFrom: orderedFrom,
+    rotateTo: orderedTo,
+    targetDate: safeTargetDate,
   };
 }
 
@@ -479,7 +541,7 @@ export function normaliseToolsRows(rawItems) {
       const height =
         item.height == null || item.height === "" ? null : clampToNumber(item.height, NaN);
 
-      return {
+      const base = {
         id,
         type,
         position,
@@ -490,6 +552,11 @@ export function normaliseToolsRows(rawItems) {
         width: width == null || Number.isNaN(width) ? null : width,
         height: height == null || Number.isNaN(height) ? null : height,
       };
+
+      if (type === "fortnight") {
+        return { ...base, fortnightState: mergeFortnightState(item.fortnightState) };
+      }
+      return base;
     })
     .filter(Boolean)
     .filter((item) => item.visible !== false)
@@ -688,6 +755,9 @@ export function saveToolsWidgets(widgets) {
       };
       if (row.width != null && Number.isNaN(row.width)) row.width = null;
       if (row.height != null && Number.isNaN(row.height)) row.height = null;
+      if (widget.type === "fortnight") {
+        row.fortnightState = mergeFortnightState(widget.fortnightState);
+      }
       return row;
     })
     .sort((a, b) => a.position - b.position);
