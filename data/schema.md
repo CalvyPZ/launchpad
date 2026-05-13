@@ -124,9 +124,10 @@ The API is mounted at `/api/*` and served via nginx reverse proxy.
 
 - Purpose: return persisted dashboard document from `../data/widgets.json` (relative to `api` service path).
 - Response: JSON object
-  - `schemaVersion`: integer (currently `1`)
+  - `schemaVersion`: integer (currently `2`)
   - `updatedAt`: ISO-8601 timestamp string
   - `widgets`: array of widget rows
+  - `toolsWidgets`: array of tool-page widget rows (same row contract as `widgets`)
     - required per row:
       - `id`: string
       - `type`: string
@@ -140,7 +141,7 @@ The API is mounted at `/api/*` and served via nginx reverse proxy.
 ### `PUT /api/widgets`
 
 - Purpose: replace the persisted dashboard document.
-- Request body: same object shape as `GET /api/widgets`.
+- Request body: same object shape as `GET /api/widgets`, with `toolsWidgets` optional.
 - Response:
   - `200` with the stored object body (including refreshed `updatedAt`).
 - Payload validation:

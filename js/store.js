@@ -90,20 +90,25 @@ function parseUpdatedAt(rawUpdatedAt) {
 }
 
 function coerceWidgetsPayload(rawPayload) {
-  if (!rawPayload) return { widgetsRaw: null, updatedAt: null };
-  if (Array.isArray(rawPayload)) return { widgetsRaw: rawPayload, updatedAt: null };
-  if (typeof rawPayload !== "object") return { widgetsRaw: null, updatedAt: null };
+  if (!rawPayload) return { widgetsRaw: null, toolsWidgetsRaw: null, updatedAt: null };
+  if (Array.isArray(rawPayload)) return { widgetsRaw: rawPayload, toolsWidgetsRaw: null, updatedAt: null };
+  if (typeof rawPayload !== "object") return { widgetsRaw: null, toolsWidgetsRaw: null, updatedAt: null };
 
   const widgetsRaw = Array.isArray(rawPayload.widgets)
     ? rawPayload.widgets
     : Array.isArray(rawPayload.data?.widgets)
     ? rawPayload.data.widgets
     : null;
+  const toolsWidgetsRaw = Array.isArray(rawPayload.toolsWidgets)
+    ? rawPayload.toolsWidgets
+    : Array.isArray(rawPayload.data?.toolsWidgets)
+    ? rawPayload.data.toolsWidgets
+    : null;
   const updatedAt = parseUpdatedAt(
     rawPayload.updatedAt || rawPayload.updated_at || rawPayload.lastUpdated
   );
 
-  return { widgetsRaw, updatedAt };
+  return { widgetsRaw, toolsWidgetsRaw, updatedAt };
 }
 
 export function normaliseWidgetRows(rawItems) {
@@ -458,20 +463,23 @@ export function saveWidgets(widgets, options = {}) {
 }
 
 export function getWidgetPayloadForApi(widgets, options = {}) {
+  const toolsWidgets = options.toolsWidgets;
   return {
     version: WIDGETS_DOCUMENT_VERSION,
     updatedAt: parseUpdatedAt(options.updatedAt) || new Date().toISOString(),
     widgets: normaliseWidgetRows(widgets || []),
+    ...(Array.isArray(toolsWidgets) ? { toolsWidgets: normaliseToolsRows(toolsWidgets || []) } : {}),
   };
 }
 
 export function loadWidgetPayloadFromApi(raw) {
   const payload = coerceWidgetsPayload(raw);
-  if (!payload.widgetsRaw) return null;
+  if (!payload.widgetsRaw && !payload.toolsWidgetsRaw) return null;
   return {
     version: (raw && raw.version) || WIDGETS_DOCUMENT_VERSION,
     updatedAt: payload.updatedAt,
-    widgets: normaliseWidgetRows(payload.widgetsRaw),
+    widgets: payload.widgetsRaw ? normaliseWidgetRows(payload.widgetsRaw) : null,
+    toolsWidgets: payload.toolsWidgetsRaw ? normaliseToolsRows(payload.toolsWidgetsRaw) : null,
   };
 }
 
@@ -484,7 +492,14 @@ export function loadToolsWidgets() {
       return fresh;
     }
     const parsed = JSON.parse(stored);
-    let widgets = normaliseToolsRows(parsed);
+    const rawTools = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.toolsWidgets)
+      ? parsed.toolsWidgets
+      : Array.isArray(parsed?.widgets)
+      ? parsed.widgets
+      : null;
+    let widgets = normaliseToolsRows(rawTools);
     evaluateAllTodoResets(widgets);
     return widgets;
   } catch {

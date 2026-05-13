@@ -601,8 +601,7 @@ document.addEventListener("alpine:init", () => {
               console.error("Widget sync beacon failed", beaconError);
             }
             if (beaconSent) {
-              this._widgetsNeedSync = false;
-              this._widgetsUpdatedAt = nextPayload.updatedAt || this._widgetsUpdatedAt;
+              console.warn(`Widget sync: sendBeacon queued (no response); keeping _widgetsNeedSync for next online PUT (${keepaliveSource})`);
               return;
             }
             if (useKeepalive) {

@@ -85,11 +85,10 @@
 - Touch: minimum `42px` controls for mobile.
 - Add-widget control now uses a keyboard-operable combobox/listbox pattern: open/close with Enter/Space/Arrow keys and close/return focus on Escape.
 
-### Sync status indicator
+### Server sync (widgets)
 
-- The header status strip is non-blocking and uses `aria-live="polite"`.
-- It shows server sync state without interrupting editing (`offline`, `syncing`, `pending`, `error`), while the app keeps saving to `calvybots_widgets` locally.
-- Sync messaging is advisory; user input and rendering should remain available while network writes/retries are in progress.
+- Widget layout and content sync to `/api/widgets` in the background; there is **no** header strip or other in-UI sync status.
+- The app still persists to `calvybots_widgets` (and tools keys) locally; failures to reach the server are logged to the console (`console.error`), not shown as app chrome.
 
 ## Motion
 

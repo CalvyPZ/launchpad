@@ -1,16 +1,17 @@
 /**
- * CalvyBots Launchpad — API sidecar
+ * CalvyBots Launchpad ? API sidecar
  *
  * Runs on port 3000 inside the Docker network; nginx proxies /api/* to this process.
- * No external dependencies — plain Node.js http module only.
+ * No external dependencies ? plain Node.js http module only.
  *
  * Routes (see data/schema.md for response shapes):
- *   GET /api/health       — liveness check
- *   GET /api/system       — runtime diagnostics
- *   GET /api/config       — serves ../data/config.json
- *   GET /api/widgets      — returns persisted widget document
- *   PUT /api/widgets      — validates + persists widget document atomically
- *   *                    — 404 JSON
+ *   GET /api/health       ? liveness check
+ *   GET /api/system       ? runtime diagnostics
+ *   GET /api/config       ? serves ../data/config.json
+ *   GET /api/widgets      ? returns persisted widget document
+ *   PUT /api/widgets      ? validates + persists widget document atomically
+ *   POST /api/widgets      ? same as PUT (navigator.sendBeacon can only POST; used as unload fallback)
+ *   *                    ? 404 JSON
  */
 
 'use strict';
@@ -25,7 +26,7 @@ const WIDGETS_PATH = path.resolve(__dirname, '..', 'data', 'widgets.json');
 const fsp = fs.promises;
 const startTime = Date.now();
 
-const WIDGETS_SCHEMA_VERSION = 1;
+const WIDGETS_SCHEMA_VERSION = 2;
 const DEFAULT_MIN_WIDTH = 250;
 const DEFAULT_MIN_HEIGHT = 178;
 const MAX_WIDGET_PAYLOAD_BYTES = 2 * 1024 * 1024;
@@ -105,6 +106,7 @@ function buildDefaultWidgetDocument() {
     schemaVersion: WIDGETS_SCHEMA_VERSION,
     updatedAt: new Date().toISOString(),
     widgets: buildDefaultWidgetRows(),
+    toolsWidgets: [],
   };
 }
 
@@ -222,25 +224,28 @@ function parseAndNormalizeRow(rawRow, index) {
   return { ok: true, value: row };
 }
 
-function parseAndNormalizeWidgetsPayload(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'Invalid payload',
-      detail: 'Payload must be a JSON object',
-    };
+function parseWidgetRowsPayload(payload, key, options = {}) {
+  const required = options.required === true;
+  const rows = payload[key];
+
+  if (rows === undefined || rows === null) {
+    if (required) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'Invalid payload',
+        detail: `Payload must include a ${key} array`,
+      };
+    }
+    return { ok: true, value: [] };
   }
 
-  const rows = Array.isArray(payload.widgets)
-    ? payload.widgets
-    : null;
-  if (!rows) {
+  if (!Array.isArray(rows)) {
     return {
       ok: false,
       status: 400,
       error: 'Invalid payload',
-      detail: 'Payload must include a widgets array',
+      detail: `Payload ${key} must be an array`,
     };
   }
 
@@ -253,12 +258,41 @@ function parseAndNormalizeWidgetsPayload(payload) {
     normalizedRows.push(result.value);
   }
 
+  return { ok: true, value: normalizedRows };
+}
+
+function parseAndNormalizeWidgetsPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'Invalid payload',
+      detail: 'Payload must be a JSON object',
+    };
+  }
+
+  const widgetsResult = parseWidgetRowsPayload(payload, 'widgets', { required: true });
+  if (!widgetsResult.ok) {
+    return widgetsResult;
+  }
+
+  const toolsWidgetsResult = parseWidgetRowsPayload(payload, 'toolsWidgets', { required: false });
+  if (!toolsWidgetsResult.ok) {
+    return toolsWidgetsResult;
+  }
+
+  const requestedSchemaVersion = Number.isInteger(payload.schemaVersion)
+    ? payload.schemaVersion
+    : WIDGETS_SCHEMA_VERSION;
+  const schemaVersion = Math.max(requestedSchemaVersion, WIDGETS_SCHEMA_VERSION);
+
   return {
     ok: true,
     value: {
-      schemaVersion: Number.isInteger(payload.schemaVersion) ? payload.schemaVersion : WIDGETS_SCHEMA_VERSION,
+      schemaVersion,
       updatedAt: new Date().toISOString(),
-      widgets: normalizedRows,
+      widgets: widgetsResult.value,
+      toolsWidgets: toolsWidgetsResult.value,
     },
   };
 }
@@ -300,6 +334,7 @@ async function writeWidgetsAtomic(document) {
 }
 
 function queueWidgetPersist(document) {
+  // Serialize disk writes so concurrent writes are applied one-at-a-time.
   const run = () => writeWidgetsAtomic(document);
   const next = writeQueue.then(run, run);
   writeQueue = next.catch(() => undefined);
@@ -463,13 +498,13 @@ const server = http.createServer((req, res) => {
         void handleGetWidgets(res);
         return;
       }
-      if (req.method === 'PUT') {
+      if (req.method === 'PUT' || req.method === 'POST') {
         void handlePutWidgets(req, res);
         return;
       }
       sendJson(res, 405, {
         error: 'Method not allowed',
-        detail: 'Use GET or PUT /api/widgets',
+        detail: 'Use GET, PUT, or POST /api/widgets',
       });
       break;
 
