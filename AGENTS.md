@@ -27,6 +27,8 @@ The app runs on Docker Compose at port 8033, typically behind a Cloudflare tunne
 | nginx (static + reverse proxy) | `web_app` | `nginx:alpine` | 8033→80 |
 | API sidecar | `web_app_api` | `node:20-alpine` | 3000 (internal) |
 
+**LAN dashboard URL (client):** http://192.168.1.245:8033 — use for browser QA and MCP browser checks when the stack is up on the home network.
+
 ### Starting the production Docker stack
 
 ```bash

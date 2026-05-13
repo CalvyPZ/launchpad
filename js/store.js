@@ -7,6 +7,54 @@ const LEGACY_TODO_KEY = "calvybots_todo";
 const DEFAULT_MIN_WIDTH = 250;
 const DEFAULT_MIN_HEIGHT = 178;
 
+/** Default task border / “none” swatch (style-guide `border`). */
+export const TODO_TASK_DEFAULT_COLOR = "#3d3d3d";
+export const TODO_TASK_NONE_COLOR = "";
+
+/**
+ * Canonical 3×3 palette (row-major):
+ * #2dd4bf, #3b82f6, #22c55e, #ef4444, none/blank, #a855f7, #ec4899, #f0f0f0, #f97316.
+ * Center none/blank reverts to default border colour in render.
+ */
+export const TODO_TASK_PALETTE = [
+  { value: "#2dd4bf", label: "Cyan" },
+  { value: "#3b82f6", label: "Blue" },
+  { value: "#22c55e", label: "Green" },
+  { value: "#ef4444", label: "Red" },
+  { value: TODO_TASK_NONE_COLOR, label: "None", isNone: true },
+  { value: "#a855f7", label: "Purple" },
+  { value: "#ec4899", label: "Pink" },
+  { value: "#f0f0f0", label: "White" },
+  { value: "#f97316", label: "Orange" },
+];
+
+const PALETTE_HEXES = new Set(
+  TODO_TASK_PALETTE.filter((entry) => !entry.isNone).map((entry) => entry.value.toLowerCase())
+);
+
+/** Earlier picker values — keep so existing saves stay stable. */
+const LEGACY_TODO_COLOR_HEXES = new Set([
+  "#1c1c1c",
+  "#242424",
+  "#2e2e2e",
+  "#2dd4bf",
+  "#1fb6a5",
+  "#9a9a9a",
+  "#5c5c5c",
+  "#f59e0b",
+]);
+
+export function normalizeTodoTaskColor(rawColor) {
+  if (rawColor == null) return null;
+  if (typeof rawColor !== "string") return null;
+  const next = rawColor.trim().toLowerCase();
+  if (!next || next === "default" || next === "none" || next === TODO_TASK_NONE_COLOR) return TODO_TASK_NONE_COLOR;
+  if (next === TODO_TASK_DEFAULT_COLOR) return TODO_TASK_DEFAULT_COLOR;
+  if (PALETTE_HEXES.has(next)) return next;
+  if (LEGACY_TODO_COLOR_HEXES.has(next)) return next;
+  return null;
+}
+
 const DEFAULT_WIDGETS = [
   { id: "widget-clock", type: "clock", position: 0 },
   { id: "widget-notes", type: "notes", position: 1 },
@@ -129,6 +177,7 @@ function mergeTodoState(raw) {
           id: String(t?.id || `t-${i}`),
           text: typeof t?.text === "string" ? t.text : "",
           done: Boolean(t?.done),
+          color: normalizeTodoTaskColor(t?.color),
         }))
         .filter((t) => t.text.length || t.id)
     : base.tasks;
@@ -197,6 +246,7 @@ export function migrateLegacyIfNeeded(widgets) {
             id: String(item?.id || `m-${i}`),
             text: typeof item?.text === "string" ? item.text : "",
             done: Boolean(item?.done),
+            color: normalizeTodoTaskColor(item?.color),
           }))
         : [];
       const prev = mergeTodoState(next[idx].todoState);
