@@ -172,6 +172,51 @@ export function render(container, context) {
     return String(fromShell || fromList || "");
   };
 
+  const getTodoItemById = (taskId) => {
+    if (!listEl || !taskId) return null;
+    return listEl.querySelector(`.todo-item[data-task-id="${escapeHtml(taskId)}"]`);
+  };
+
+  const getColorPanel = (taskId) => {
+    if (!taskId) return null;
+    return document.querySelector(`.todo-color-panel[data-task-id="${escapeHtml(taskId)}"]`);
+  };
+
+  const VIEWPORT_GAP = 6;
+  const getViewportBounds = () => {
+    const viewport = window.visualViewport;
+    const left = Number(viewport?.offsetLeft || 0);
+    const top = Number(viewport?.offsetTop || 0);
+    const width = Number(viewport?.width || window.innerWidth);
+    const height = Number(viewport?.height || window.innerHeight);
+    return {
+      left,
+      top,
+      right: left + width,
+      bottom: top + height,
+    };
+  };
+
+  const clampToRange = (value, min, max) => {
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return value;
+    if (max < min) return min;
+    return Math.min(Math.max(value, min), max);
+  };
+
+  const restoreColorPanel = (taskId, panel) => {
+    if (!taskId || !panel || panel.dataset.portalToBody !== "true") return;
+    const row = getTodoItemById(taskId);
+    if (!row) {
+      if (panel.parentElement === document.body) {
+        panel.remove();
+      }
+      panel.dataset.portalToBody = "false";
+      return;
+    }
+    row.appendChild(panel);
+    panel.dataset.portalToBody = "false";
+  };
+
   const readTasksForWidget = (widgetId) => {
     const widget = getTodoWidget(widgetId);
     if (!widget?.todoState) return [];
@@ -324,36 +369,41 @@ export function render(container, context) {
   };
 
   const positionColorPanel = (taskId) => {
-    if (!listEl || !taskId) return false;
-    const row = listEl.querySelector(`.todo-item[data-task-id="${escapeHtml(taskId)}"]`);
-    if (!row) return false;
+    const row = getTodoItemById(taskId);
+    if (!taskId || !row) return false;
     const button = row.querySelector("[data-task-color-toggle]");
-    const panel = row.querySelector("[data-task-color-panel]");
+    const panel = getColorPanel(taskId);
     if (!button || !panel) return false;
 
     const triggerRect = button.getBoundingClientRect();
     panel.style.position = "fixed";
     panel.style.zIndex = "40";
     panel.style.visibility = "hidden";
-    panel.style.left = `${Math.max(0, Math.round(triggerRect.left))}px`;
-    panel.style.top = `${Math.round(triggerRect.bottom + 6)}px`;
-    panel.style.visibility = "hidden";
     panel.hidden = false;
+    panel.style.left = "0px";
+    panel.style.top = "0px";
 
-    const panelRect = panel.getBoundingClientRect();
-    const maxX = window.innerWidth - panelRect.width - 6;
-    const maxY = window.innerHeight - panelRect.height - 6;
-    let left = triggerRect.left;
-    let top = triggerRect.bottom + 6;
-
-    if (top + panelRect.height + 6 > window.innerHeight && triggerRect.top > panelRect.height + 6) {
-      top = triggerRect.top - panelRect.height - 6;
+    if (panel.parentElement !== document.body) {
+      document.body.appendChild(panel);
+      panel.dataset.portalToBody = "true";
     }
 
-    if (top > maxY) top = maxY;
-    if (top < 6) top = 6;
-    if (left > maxX) left = maxX;
-    if (left < 6) left = 6;
+    const panelRect = panel.getBoundingClientRect();
+    const viewport = getViewportBounds();
+    const maxTop = viewport.bottom - panelRect.height - VIEWPORT_GAP;
+    const minTop = viewport.top + VIEWPORT_GAP;
+    const minLeft = viewport.left + VIEWPORT_GAP;
+    const maxLeft = viewport.right - panelRect.width - VIEWPORT_GAP;
+    const preferredTop = triggerRect.bottom + VIEWPORT_GAP;
+    const fallbackTop = triggerRect.top - panelRect.height - VIEWPORT_GAP;
+
+    let top = preferredTop;
+    if (top > maxTop && fallbackTop >= minTop) {
+      top = fallbackTop;
+    }
+    top = clampToRange(top, minTop, maxTop);
+
+    const left = clampToRange(triggerRect.left, minLeft, maxLeft);
 
     panel.style.left = `${Math.round(left)}px`;
     panel.style.top = `${Math.round(top)}px`;
@@ -362,34 +412,34 @@ export function render(container, context) {
   };
 
   const closeColorPanel = (taskId = activeColorTaskId) => {
-    if (!listEl) {
-      activeColorTaskId = null;
-      return;
-    }
-    if (!taskId) {
-      activeColorTaskId = null;
-      listEl.querySelectorAll("[data-task-color-panel]").forEach((panel) => {
-        panel.hidden = true;
-        panel.classList.remove("is-open");
-        panel.style.left = "";
-        panel.style.top = "";
-      });
-      listEl.querySelectorAll("[data-task-color-toggle]").forEach((button) => button.setAttribute("aria-expanded", "false"));
-      return;
-    }
-    const row = listEl.querySelector(`.todo-item[data-task-id="${escapeHtml(taskId)}"]`);
-    if (!row) {
-      activeColorTaskId = null;
-      return;
-    }
-    const panel = row.querySelector("[data-task-color-panel]");
-    const button = row.querySelector("[data-task-color-toggle]");
-    if (panel) {
+    const closeSinglePanel = (panel, panelTaskId) => {
+      if (!panel) return;
       panel.hidden = true;
       panel.classList.remove("is-open");
       panel.style.left = "";
       panel.style.top = "";
+      panel.style.visibility = "";
+      restoreColorPanel(panelTaskId, panel);
+    };
+
+    if (!taskId) {
+      if (!listEl) {
+        activeColorTaskId = null;
+        return;
+      }
+      activeColorTaskId = null;
+      const activePanels = document.querySelectorAll("[data-task-color-panel]");
+      activePanels.forEach((panel) => {
+        closeSinglePanel(panel, panel.dataset.taskId);
+      });
+      listEl.querySelectorAll("[data-task-color-toggle]").forEach((button) => button.setAttribute("aria-expanded", "false"));
+      return;
     }
+
+    const row = getTodoItemById(taskId);
+    const panel = getColorPanel(taskId);
+    closeSinglePanel(panel, taskId);
+    const button = row?.querySelector("[data-task-color-toggle]");
     if (button) button.setAttribute("aria-expanded", "false");
     activeColorTaskId = null;
   };
@@ -646,22 +696,36 @@ export function render(container, context) {
 
   const onDocumentPointerDown = (event) => {
     if (!activeColorTaskId) return;
-    const row = listEl?.querySelector(`.todo-item[data-task-id="${escapeHtml(activeColorTaskId)}"]`);
-    if (!row || !row.contains(event.target)) {
+    const row = getTodoItemById(activeColorTaskId);
+    const panel = getColorPanel(activeColorTaskId);
+    if (
+      (!row || !row.contains(event.target)) &&
+      (!panel || !panel.contains(event.target))
+    ) {
       closeColorPanel();
     }
   };
 
   const onDocumentFocusIn = (event) => {
     if (!activeColorTaskId) return;
-    const row = listEl?.querySelector(`.todo-item[data-task-id="${escapeHtml(activeColorTaskId)}"]`);
-    if (!row || !row.contains(event.target)) {
+    const row = getTodoItemById(activeColorTaskId);
+    const panel = getColorPanel(activeColorTaskId);
+    if (
+      (!row || !row.contains(event.target)) &&
+      (!panel || !panel.contains(event.target))
+    ) {
       closeColorPanel();
     }
   };
 
   const onTaskListKeydown = (event) => {
     if (event.key === "Escape") closeColorPanel();
+  };
+
+  const onTodoColorPanelKeydown = (event) => {
+    if (event.key === "Escape") {
+      closeColorPanel();
+    }
   };
 
   const onTodoColorPanelRelocate = () => {
@@ -671,6 +735,8 @@ export function render(container, context) {
       closeColorPanel(activeColorTaskId);
     }
   };
+
+  const todoColorPanelViewport = window.visualViewport;
 
   const setTaskDone = (taskId, isDone) => {
     items = items.map((task) => (task.id === taskId ? { ...task, done: Boolean(isDone) } : task));
@@ -722,6 +788,7 @@ export function render(container, context) {
 
   const renderList = () => {
     if (!listEl) return;
+    if (activeColorTaskId) closeColorPanel(activeColorTaskId);
     if (!items.length) {
       listEl.innerHTML = "<p class=\"todo-empty\" role=\"status\">No tasks yet.</p>";
       return;
@@ -819,6 +886,11 @@ export function render(container, context) {
         });
       }
 
+      const panel = taskElement.querySelector("[data-task-color-panel]");
+      if (panel) {
+        panel.addEventListener("keydown", onTodoColorPanelKeydown);
+      }
+
       taskElement.querySelectorAll("[data-task-color-btn]").forEach((button) => {
         button.addEventListener("click", () => setTaskColor(taskId, button.dataset.taskColor));
       });
@@ -856,6 +928,8 @@ export function render(container, context) {
   listEl?.addEventListener("keydown", onTaskListKeydown);
   window.addEventListener("scroll", onTodoColorPanelRelocate, true);
   window.addEventListener("resize", onTodoColorPanelRelocate);
+  todoColorPanelViewport?.addEventListener("scroll", onTodoColorPanelRelocate);
+  todoColorPanelViewport?.addEventListener("resize", onTodoColorPanelRelocate);
   document.addEventListener("pointerdown", onDocumentPointerDown);
   document.addEventListener("focusin", onDocumentFocusIn);
 
@@ -875,6 +949,8 @@ export function render(container, context) {
       listEl?.removeEventListener("keydown", onTaskListKeydown);
       window.removeEventListener("scroll", onTodoColorPanelRelocate, true);
       window.removeEventListener("resize", onTodoColorPanelRelocate);
+      todoColorPanelViewport?.removeEventListener("scroll", onTodoColorPanelRelocate);
+      todoColorPanelViewport?.removeEventListener("resize", onTodoColorPanelRelocate);
       detachTaskPointerMove();
       if (!taskDragState.finalized && taskDragState.active) {
         taskDragState.finalized = true;

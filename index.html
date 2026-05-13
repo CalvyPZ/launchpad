@@ -66,123 +66,27 @@
       <!-- Header -->
       <header class="site-header border-b border-border bg-surface">
         <div class="mx-auto max-w-6xl px-5 py-4">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-
-            <!-- Branding + title -->
-            <div class="flex flex-wrap items-center gap-4 min-w-0">
-              <img
-                src="icons/logo-lockup.svg"
-                width="248"
-                height="36"
-                alt=""
-                role="presentation"
-                class="h-8 w-auto shrink-0 sm:h-9"
-              />
-              <h1
-                class="text-2xl sm:text-3xl font-semibold leading-tight tracking-tight text-text-1 cursor-text outline-none min-w-0"
-                contenteditable="true"
-                role="textbox"
-                aria-label="Dashboard title"
-                x-text="siteTitle"
-                @blur="setSiteTitle($event.target.textContent)"
-                spellcheck="false"
-              ></h1>
-            </div>
-
-            <!-- Controls -->
-            <div class="flex flex-wrap items-center gap-2">
-
-              <!-- Clock display -->
-              <div class="inline-flex flex-col rounded-card border border-border bg-elevated px-3 py-2 min-w-[10rem]">
-                <p class="text-text-1 font-medium text-sm leading-none" x-text="clockTime"></p>
-                <p class="text-text-3 text-xs mt-1" x-text="clockDate"></p>
-              </div>
-
-              <!-- Edit toggle -->
-              <button
-                type="button"
-                class="inline-flex items-center gap-1.5 rounded-btn border border-border bg-elevated px-3 py-2 text-sm font-medium text-text-2 transition-colors hover:border-accent hover:text-accent"
-                :class="editMode ? 'border-accent text-accent' : ''"
-                @click="toggleEditMode()"
-                :aria-pressed="editMode"
-              >
-                <span x-text="editMode ? '✖' : '✎'" aria-hidden="true"></span>
-                <span x-text="editMode ? 'Done' : 'Edit'"></span>
-              </button>
-
-              <!-- Add widget button + picker dropdown -->
-              <div class="relative" x-show="editMode">
-                <button
-                  type="button"
-                  x-ref="addWidgetButton"
-                  class="inline-flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90"
-                  @click="toggleAddWidgetPicker()"
-                  @keydown="handleAddWidgetTriggerKeydown($event)"
-                  aria-haspopup="listbox"
-                  aria-controls="widget-picker-list"
-                  role="combobox"
-                  :aria-expanded="addWidgetOpen"
-                  :aria-activedescendant="addWidgetOpen ? addWidgetActiveOptionId : null"
-                  aria-label="Add widget"
-                >
-                  <span aria-hidden="true">＋</span>
-                  Add Widget
-                </button>
-
-                <!-- Picker dropdown -->
-                <div
-                  id="widget-picker-list"
-                  x-ref="addWidgetList"
-                  class="widget-picker"
-                  x-show="addWidgetOpen"
-                  x-transition:enter="transition ease-out duration-100"
-                  x-transition:enter-start="opacity-0 translate-y-1"
-                  x-transition:enter-end="opacity-100 translate-y-0"
-                  x-transition:leave="transition ease-in duration-75"
-                  x-transition:leave-start="opacity-100 translate-y-0"
-                  x-transition:leave-end="opacity-0 translate-y-1"
-                  @click.outside="closeAddWidgetPicker(true)"
-                  @keydown="handleAddWidgetOptionKeydown($event)"
-                  role="listbox"
-                  aria-label="Choose a widget to add"
-                >
-                  <p class="widget-picker-label">Add a widget</p>
-                  <template x-for="(option, index) in getAddWidgetPickerOptions()" :key="option.type">
-                    <button
-                      x-ref="addWidgetOption"
-                      type="button"
-                      role="option"
-                      class="widget-picker-option"
-                      :class="addWidgetPickerIndex === index ? 'is-active' : ''"
-                      :aria-selected="addWidgetPickerIndex === index"
-                      :tabindex="addWidgetPickerIndex === index ? 0 : -1"
-                      :id="`add-widget-option-${option.type}`"
-                      @click="activateAddWidgetOption(index)"
-                    >
-                      <span aria-hidden="true" x-text="option.icon"></span>
-                      <span x-text="option.label"></span>
-                    </button>
-                  </template>
-                </div>
-              </div>
-
-              <p
-                class="edit-mode-hint basis-full w-full max-w-xl text-xs text-text-2 sm:text-sm"
-                x-show="editMode"
-                x-cloak
-              >
-                <strong class="text-text-1">Edit mode:</strong> drag a widget&rsquo;s corner to resize; use the header field to rename. Drag <span aria-hidden="true">⠿</span> to reorder.
-              </p>
-
+          <div class="flex items-center gap-4 min-w-0 header-top-row">
+            <img
+              src="icons/logo-lockup.svg"
+              width="248"
+              height="36"
+              alt=""
+              role="presentation"
+              class="h-8 w-auto shrink-0 sm:h-9"
+            />
+            <div class="header-time-readout">
+              <p class="header-clock-time" x-text="clockTime"></p>
+              <p class="header-clock-date" x-text="clockDate"></p>
             </div>
           </div>
         </div>
       </header>
 
-      <!-- Primary navigation (Home / Tools) -->
+      <!-- Primary navigation (Home / Tools / Debug) -->
       <nav class="app-nav border-b border-border bg-surface" aria-label="Primary">
         <div class="mx-auto max-w-6xl px-5">
-          <div class="flex gap-0" role="tablist" aria-orientation="horizontal">
+          <div class="flex gap-0 items-center" role="tablist" aria-orientation="horizontal">
             <button
               type="button"
               role="tab"
@@ -197,7 +101,7 @@
             </button>
             <button
               type="button"
-              role="tab"
+              role="button"
               class="nav-tab"
               id="tab-tools"
               :class="currentPage === 'tools' ? 'nav-tab-active' : ''"
@@ -207,14 +111,104 @@
             >
               Tools
             </button>
+            <button
+              type="button"
+              role="button"
+              class="nav-tab nav-edit-tab"
+              id="tab-edit"
+              :class="editMode ? 'nav-tab-active' : ''"
+              :aria-pressed="editMode"
+              @click="toggleEditMode()"
+              aria-label="Toggle edit mode"
+            >
+              <span aria-hidden="true" x-text="editMode ? '✖' : '✎'"></span>
+              <span x-text="editMode ? 'Done' : 'Edit'"></span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="nav-tab ml-auto"
+              id="tab-debug"
+              :class="currentPage === 'debug' ? 'nav-tab-active' : ''"
+              :aria-selected="currentPage === 'debug'"
+              :tabindex="currentPage === 'debug' ? 0 : -1"
+              @click="navigateTo('debug')"
+            >
+              Debug
+            </button>
           </div>
         </div>
       </nav>
 
+      <!-- Edit controls bar (visible in edit mode) -->
+      <section class="home-toolbar border-b border-border bg-surface" x-show="editMode" x-cloak>
+        <div class="mx-auto max-w-6xl px-5 py-3">
+          <div class="home-toolbar-inner">
+            <div class="home-toolbar-add relative">
+              <button
+                type="button"
+                x-ref="addWidgetButton"
+                class="home-toolbar-btn btn-primary"
+                @click="toggleAddWidgetPicker()"
+                @keydown="handleAddWidgetTriggerKeydown($event)"
+                aria-haspopup="listbox"
+                aria-controls="widget-picker-list"
+                role="combobox"
+                :aria-expanded="addWidgetOpen"
+                :aria-activedescendant="addWidgetOpen ? addWidgetActiveOptionId : null"
+                aria-label="Add widget"
+              >
+                <span aria-hidden="true">＋</span>
+                Add Widget
+              </button>
+
+              <div
+                id="widget-picker-list"
+                x-ref="addWidgetList"
+                class="widget-picker"
+                x-show="addWidgetOpen"
+                x-transition:enter="transition ease-out duration-100"
+                x-transition:enter-start="opacity-0 translate-y-1"
+                x-transition:enter-end="opacity-100 translate-y-0"
+                x-transition:leave="transition ease-in duration-75"
+                x-transition:leave-start="opacity-100 translate-y-0"
+                x-transition:leave-end="opacity-0 translate-y-1"
+                @click.outside="closeAddWidgetPicker(true)"
+                @keydown="handleAddWidgetOptionKeydown($event)"
+                role="listbox"
+                aria-label="Choose a widget to add"
+              >
+                <p class="widget-picker-label">Add a widget</p>
+                <template x-for="(option, index) in getAddWidgetPickerOptions()" :key="option.type">
+                  <button
+                    x-ref="addWidgetOption"
+                    type="button"
+                    role="option"
+                    class="widget-picker-option"
+                    :class="addWidgetPickerIndex === index ? 'is-active' : ''"
+                    :aria-selected="addWidgetPickerIndex === index"
+                    :tabindex="addWidgetPickerIndex === index ? 0 : -1"
+                    :id="`add-widget-option-${option.type}`"
+                    @click="activateAddWidgetOption(index)"
+                  >
+                    <span aria-hidden="true" x-text="option.icon"></span>
+                    <span x-text="option.label"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <p class="edit-mode-hint">
+            <strong class="text-text-1">Edit mode:</strong> drag a widget&rsquo;s corner to resize; use widget title fields to rename. Drag <span aria-hidden="true">⠿</span> to reorder.
+          </p>
+        </div>
+      </section>
+
       <div class="pages-viewport flex-1 min-h-0 w-full">
         <div
           class="pages-track"
-          :class="currentPage === 'tools' ? 'pages-track--tools' : 'pages-track--home'"
+          :class="currentPage === 'debug' ? 'pages-track--debug' : currentPage === 'tools' ? 'pages-track--tools' : 'pages-track--home'"
         >
           <!-- Home page -->
           <div class="page-panel" id="page-home" :aria-hidden="currentPage !== 'home'">
@@ -233,11 +227,51 @@
               </section>
             </main>
           </div>
+          <!-- Debug page -->
+          <div class="page-panel" id="page-debug" :aria-hidden="currentPage !== 'debug'">
+            <main class="mx-auto w-full max-w-6xl px-5 py-6">
+              <section id="debug-grid" x-ref="debugGrid" class="widget-grid">
+                <!-- Debug widgets injected by app.js -->
+              </section>
+            </main>
+          </div>
         </div>
       </div>
 
-      <footer class="border-t border-border py-3 text-center text-xs text-text-3">
-        Calvy Launchpad
+      <footer
+        x-show="currentPage === 'debug'"
+        class="widget-sync-strip border-t border-border text-xs text-text-3"
+        x-cloak
+        aria-live="polite"
+        aria-label="Widget sync status"
+      >
+        <div class="mx-auto max-w-6xl px-5 py-3">
+          <div class="widget-sync-strip-grid">
+            <p class="widget-sync-strip-row">
+              <span class="widget-sync-strip-label">Last sync</span>
+              <span class="widget-sync-strip-value" x-text="widgetSyncStripLastSyncLabel()"></span>
+            </p>
+            <p class="widget-sync-strip-row">
+              <span class="widget-sync-strip-label">Sync flag</span>
+              <span class="widget-sync-strip-value" x-text="widgetSyncStripSyncStateLabel()"></span>
+            </p>
+            <p class="widget-sync-strip-row">
+              <span class="widget-sync-strip-label">Next outbound</span>
+              <span
+                class="widget-sync-strip-value"
+                x-text="widgetSyncStripNextCountdownLabel()"
+              ></span>
+            </p>
+            <p class="widget-sync-strip-row">
+              <span class="widget-sync-strip-label">Last outcome</span>
+              <span class="widget-sync-strip-value" x-text="widgetSyncStripPushOutcomeLabel()"></span>
+            </p>
+            <p class="widget-sync-strip-row">
+              <span class="widget-sync-strip-label">Retrieve policy</span>
+              <span class="widget-sync-strip-value" x-text="widgetSyncStripRetrieveLabel()"></span>
+            </p>
+          </div>
+        </div>
       </footer>
     </div>
 

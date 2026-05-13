@@ -2,6 +2,212 @@
 
 Date: 2026-05-13
 
+### Client direction ? Service worker diagnostics false-positive (2026-05-13)
+
+**Status:** Closed from Team Lead.
+
+**Priority:** P2.
+
+**Client scope:** Fix recurring diagnostics warning:
+
+- `js/site-diagnostics.js` reports `Service worker ? Registered but not controlling this page yet.` on first-load registration path.
+- Treat first-load SW takeover timing as a controlled state transition instead of a defect.
+- Preserve warning/critical reporting for unsupported SW or genuinely missing SW control after bounded controller wait.
+
+**No backend changes expected.**
+
+**Assignment file:** `team/assignments-sw-controller-warning-fix.md`
+
+**Acceptance guidance:**
+
+- No repeated false-warning entries from normal first-load SW handoff.
+- `status` is `ok` when SW is actively controlling after handoff or reload.
+- Persistent/real SW-control failures remain visible as warning/critical per existing semantics.
+
+**Execution status (completed):**
+
+- **Frontend implementation:** completed in `js/site-diagnostics.js`.
+- **QA:** `Pass with notes` from `qa-engineer` on this assignment.
+- **Outcome:** recurring first-load SW-control warning noise is now treated as a bounded transition state; warning/critical reporting remains for unsupported or persistent control failures.
+- **Readiness / sign-off:** approved for closure from this cycle; no remaining blocking items.
+
+### Client direction ? QA remediation follow-up v3 (2026-05-13)
+
+### Client direction ? Dashboard module regression checkpoint (2026-05-13)
+
+**Status:** Frontend implementation complete, QA checkpoint passed; cycle awaiting interactive smoke.
+
+**Scope:** Resolve module bootstrap regression caused by `normaliseToolsRows` visibility and Alpine startup path changes after recent dashboard sync work.
+
+**Outcome:** `js/store.js:382` now exports `normaliseToolsRows`, allowing `js/app.js` to import it during module init. QA verified clean `launchpad` Alpine bootstrap shape (including keys and widget sync strip label methods) and no regression in static paths.
+
+**QA verdict:** Pass (`qa-engineer` static/module scope review).
+
+**Follow-up required before client demo:** one interactive cold-start browser smoke on live host to confirm:
+- zero console import errors at first paint with fresh/private tab state,
+- widget rows render correctly (Home/Tools),
+- no immediate state overwrite or sync strip regression.
+
+**Owner:** Frontend and QA completed; Team Lead monitors completion of the one interactive smoke.
+
+### Client direction ? QA remediation follow-up v3 (2026-05-13)
+
+**Status:** Completed by Frontend Dev.
+
+**Scope:** Resolve medium follow-up on focus/active accents and touch target height in `css/style.css`, and close `team/assignments-qa-remediation-v3.md`.
+
+**Outcome:** `css/style.css` focus/active purple tokens in all requested selectors were replaced with `#2dd4bf` (or neutral values), `.nav-tab` `min-height` is now `42px`, and `body` font stack now matches the active Outfit config in `index.html`.
+
+No QA retest executed in this turn (frontend scope-only update).  
+
+### Client direction ? Header toolbar cleanup (2026-05-13)
+
+**Status:** Completed by Frontend Dev (implementation delivered).
+
+**Priority:** UI polish / consistency (P2).
+
+**Client scope:**  
+Remove header chrome content from the top banner and move editing controls into a dedicated toolbar beneath the header.
+
+- Remove clock widget from the site header.
+- Remove editable site title/contenteditable title control from header.
+- Move Edit/Done toggle into a toolbar directly below the header.
+- Restyle Done and Add Widget controls to match existing style-guide buttons with cyan/dark tokens and clear accessible naming.
+- Keep widget-add and edit-mode handlers in `js/app.js` as the logic source (preferably no logic changes; wiring updates allowed only if needed for the new toolbar placement).
+
+**Assignment issued:** `team/assignments-header-toolbar-redesign.md`
+
+**Acceptance (for implementation):**
+
+- Header no longer shows clock or editable title.
+- Toolbar exists directly under header and contains edit controls.
+- Done/Add Widget actions work in same session flows as before with no add-widget behavior regression.
+- Buttons use style-guide-aligned classes/states (cyan accent, non-purple active/focus).
+- Control focus order remains usable from keyboard.
+
+**Execution note:** Frontend Dev should update `team/style-guide.md` if any visible control pattern is modified.
+QA should run the updated visual/accessibility check after implementation before closing this cycle.
+
+### Client direction ? Header time/date + edit bar layout (2026-05-13)
+
+**Status:** Open, delegated to Frontend Dev.
+
+**Priority:** UI shell consistency (P1).
+
+**Client scope:**
+Replace remaining clock/widget and control placement behavior from the previous pass with a header readout and nav-integrated edit control flow.
+
+- Remove `clock` from active add-widget choices and supported active flow where it should no longer appear as a normal widget.
+- Add a header time/date readout below the logo:
+  - time text in large blue style
+  - 24h format
+  - no seconds
+  - date text smaller and white on the next line
+- Position the Edit button to the left of Debug in the nav row, styled as a tab peer to Debug.
+- Click Edit to reveal a new edit-control bar directly beneath the existing tab navbar.
+- Keep existing edit state and picker behavior intact.
+
+**Assignment file:** `team/assignments-header-time-date-toolbar-v2.md`
+
+**Acceptance (for implementation):**
+
+- header shell no longer exposes clock widget title/content as a dashboard control
+- header time/date render is formatted as requested
+- edit button is placed left of Debug and appears as matching tab styling
+- edit mode reveals control bar under the tab navbar
+- no regressions for add-widget flow, focus behavior, and persistence
+
+**Execution note:** Frontend should update `team/style-guide.md` only if control patterns/tokens were modified.
+QA verified keyboard sequence and mobile behavior; `qa-engineer` returned **Pass with notes**.
+
+### Team Lead sign-off ? Header toolbar and clock readout (2026-05-13)
+
+**QA outcome:** `Pass with notes` (`qa-engineer`).
+
+**What was reviewed:** header clock removal from widget controls, read-only header 24h no-seconds time/date rendering, nav `Edit` placement and behavior, edit bar reveal below tabs, no add-widget and persistence regressions.
+
+**Remaining item:** low-priority cleanup only for stale `.clock-time` styles left in `css/style.css` (no functional impact).
+
+**Sign-off guidance:** Close this cycle as approved; no blockers remain. Optional Frontend follow-up is non-blocking and can be handled as a tiny cleanup track if desired.
+
+**Queued follow-up (optional):** remove dead `.clock-time` CSS selectors from `css/style.css`.
+
+### Client direction ? Tools + Debug route split (2026-05-13)
+
+**Status:** Open, delegated to Frontend Dev.
+
+**Priority:** Navigation + shell behavior (P2).
+
+**Client scope:**  
+Rename the current Tools tab to Debug; add a dedicated Tools tab with a placeholder widget by default; show the debug footer only when Debug is active.
+
+- Tabs must be labeled **Home**, **Tools**, **Debug**.
+- Debug tab remains right-side anchored/behaviorally equivalent to the previous right-side tab.
+- New Tools tab shows placeholder content out-of-the-box when Tools widgets are not yet defined.
+- The debug footer should be conditionally visible only on `currentPage === 'debug'`.
+
+**Assignment issued:** `team/assignments-tools-debug-tab.md`
+
+**Acceptance (for implementation):**
+
+- Navbar uses three labels and preserves right-side behavior for Debug.
+- Tools opens with placeholder widget by default on first run/no saved tools state.
+- Debug footer is gated by page state and is hidden in Home + Tools.
+
+**QA plan:** QA to run focused interactive review after Frontend handoff:
+- correct tab routing for all three states,
+- default placeholder presence in Tools,
+- footer visibility transitions on page changes.
+
+**Execution note:** Frontend should update `team/style-guide.md` only if any new visible UI pattern/token usage is introduced.
+
+### Execution status (2026-05-13)
+
+**Frontend implementation:** Delegated to `frontend-senior-dev` via `team/assignments-tools-debug-tab.md`; implementation summary received.  
+**Next step:** QA verification cycle for navigation and footer-gating behavior.
+
+### QA outcome (2026-05-13)
+
+**QA verdict:** Pass with notes (`qa-engineer`).
+
+- Static review confirms:
+  - Home/Tools/Debug labels route correctly.
+  - Debug tab remains right-side in nav.
+  - Footer renders only when `currentPage === 'debug'`.
+  - Tools tab fallback creates placeholder when no Tools payload exists.
+- Required follow-up items remain interactive:
+  - fresh-state verification for placeholder visibility,
+  - live tab switching at different breakpoints,
+  - footer visibility confirmation across transitions.
+
+### Client direction ? Footer sync debug strip (2026-05-13)
+
+**Status:** Open, delegated to Frontend Dev.
+
+**Client scope:** Convert the bottom footer from static text ("Calvy Launchpad") into a live sync debug strip for server actions and state. Must show last sync timestamp, local dirty/synced flag, next sync countdown, last sync outcome (success/fail/skip), and next retrieve countdown semantics under current sync policy.
+
+**Assignment issued:** `team/assignments-footer-debug-strip.md`
+
+**Priority / decision:** P2 utility/debug visibility.
+
+**Execution notes:**
+- Keep current sync semantics:
+  - Debounce outbound sync: `WIDGET_SYNC_DEBOUNCE_MS = 350`
+  - Periodic push interval: `WIDGET_SYNC_PUSH_MS = 3000`
+  - Reconcile polling timer remains `WIDGET_SYNC_POLL_MS = 4000`, but payload reconcile is bootstrap-only in current `reconcileServerWidgets(trigger === "init")`.
+- Render entirely inside the existing `x-data="launchpad"` scope.
+- No `js/event-bus.js` or `js/widget-registry.js` coupling required.
+- Frontend should add a style-guide note for the footer debug strip if tokens/colors/patterns are introduced.
+
+**QA plan:** Frontend static/interactive review by QA Engineer after implementation, focused on readable layout, countdown transitions, offline visibility, and Alpine boundary correctness.
+
+### Execution status (2026-05-13)
+
+**Frontend implementation:** delegated and completed (`team/assignments-footer-debug-strip.md`) by `frontend-senior-dev`.
+
+**QA result:** `Pass with notes` from `qa-engineer` (static verification).  
+Interactive confirmation remains recommended for transition timing and offline behavior before final Team Lead closure.
+
 ### Client direction ? API persistence mount fallback (2026-05-13)
 
 **Status:** Backend container persistence now uses a compose bootstrap + named data volume to avoid write attempts on host `/mnt/data` while preserving `/api` contract.
@@ -225,6 +431,13 @@ Per **`team/assignments-qa-remediation-v1.md`** (Definition of done and ordered 
 
 - **Commits:** Include **all** files that are part of the same deliverable (including `team/` updates), not a subset of product files only.
 - **Frontend Dev:** **Always** update `team/style-guide.md` when shipping UI/CSS/widget/store-visible behaviour changes so documentation matches implementation (see `.cursor/agents/frontend-senior-dev.md` and `workflow-and-process.mdc`).
+
+### Policy update ? commit scope normalized (2026-05-13)
+
+- Canonicalized the commit rule: commit source/doc/tooling files by default; only exclude live runtime data/state files.
+- Added the global rule in `.cursorrules` under `Commit eligibility policy (runtime vs source)`.
+- Canonical runtime exclusion example remains `data/widgets.json` (service-updated persistence data), while source files (`js`, `css`, `html`), markdown, agent files, and `.cursor` setup files remain commit-eligible for normal deliverables.
+- Added `team/lead-status.md` guidance so this instruction is visible to future delegation cycles.
 ### 2026-05-13 Follow-up delegation ? QA remediation pass 2
 
 - **Track:** Frontend accessibility + picker UX follow-up from prior QA findings.
@@ -255,6 +468,25 @@ Per **`team/assignments-qa-remediation-v1.md`** (Definition of done and ordered 
 - **Status:** frontend follow-up closure recorded; remaining work remains interactive verification where already recommended.
 
 ---
+
+### QA follow-up cycle 5 ? focus states + visual consistency (2026-05-13)
+
+**Status:** Open, delegated to Frontend Dev.
+
+**Findings from QA re-check request:**
+
+- Medium residual focus/active color inconsistency in `css/style.css` selectors still using violet/purple in active/focus styling:
+  - `.dash-widget.editable`
+  - `.widget-handle`
+  - `.note-area:focus-visible`
+  - `.search-input:focus`
+  - `.widget-title-input:focus-visible`
+- `nav-tab` uses `min-height: 40px` while touch targets in `team/style-guide.md` require `42px`.
+- Body type stack currently sets `Inter` explicitly in `css/style.css`; `index.html` config and docs currently align to Outfit import, so this is a conflict candidate.
+
+**Assignment issue:** `team/assignments-qa-remediation-v3.md` (Frontend)
+
+**Expected outcome:** Frontend executes scoped CSS cleanup and optional font-stack reconciliation, then QA performs the next verification cycle for final sign-off.
 
 ### Bug fix cycle ? Mobile scroll-during-drag (2026-05-13)
 
@@ -607,6 +839,52 @@ docker compose logs --tail=40 api
 
 ---
 
+---
+
+## P0 Regression ? Cold-load clobber fix (2026-05-13)
+
+### Manager summary
+
+**Root cause confirmed from live logs:** a new device with empty `localStorage` stamped a fabricated `updatedAt` (via `new Date()`) during cold load, making local 3-widget defaults appear newer than the server's real 5-widget document. The reconciler then pushed the empty defaults to the server, clobbering the user's data.
+
+**Fix already applied to live files on NAS (not yet committed):**
+- `js/store.js` `saveWidgets`: changed `parseUpdatedAt(options.updatedAt) || new Date()` ? `"updatedAt" in options ? parseUpdatedAt(options.updatedAt) : new Date()` ? preserves `null` when caller passes `updatedAt: null`.
+- `js/store.js` `getWidgetPayloadForApi`: same null-preservation pattern.
+- `js/app.js` `persistWidgets({ sync: false })` (~line 626): removed `|| new Date().toISOString()` fabrication.
+- `js/app.js` `persistToolsWidgets` no-sync branch (~line 234): same removal.
+
+**Result of fix:** cold load keeps `localTs = null` / `hasLocalTs = false`, so `remoteLooksNewer = true` always when server has real `updatedAt`, and `applyRemotePayload()` runs correctly ? server state wins on fresh device.
+
+**SW cache bump required:** existing devices are running old cached `js/app.js` / `js/store.js` from `calvybots-v4`. Must bump to `calvybots-v5` to force re-fetch.
+
+### Priority: **P0 ? active data-loss regression, client witnessed it in real time**
+
+### Delegation
+
+| Owner | Task | Files |
+|-------|------|-------|
+| Backend Senior Dev | Bump `sw.js` CACHE from `calvybots-v4` ? `calvybots-v5` | `sw.js` line 2 |
+| Frontend Senior Dev | Commit live fixes (already applied) | `js/app.js`, `js/store.js` |
+| QA | Verify new device no longer clobbers server; SW shows v5; no bad PUT in logs | `team/lead-status.md` update |
+
+### Execution status
+
+- **Backend Dev:** **Complete** ? `sw.js` line 2 changed to `'calvybots-v5'` (included in Frontend commit below).
+- **Frontend Dev:** **Complete** ? Two commits landed:
+  - `92de715` ? `fix(sync): prevent cold-load timestamp fabrication clobbering server widgets` (`js/app.js`, `js/store.js`, `sw.js`)
+  - `cf28d27` ? `fix(sync): patch flushWidgetsBeforeExit cold-load timestamp fabrication` (`js/app.js`, one-line follow-up for missed callsite found by QA)
+- **QA:** **Pass** ? All 5 acceptance bullets verified by static code review. No fabrication patterns remain. `compareUpdatedAt(null, serverTs)` returns -1 (remote wins). `sw.js` is `calvybots-v5`. 4-step clobber path broken at step 2.
+
+### Sign-off ? Team Lead
+
+**P0 cycle closed.** Fix is complete and verified. Both commits are on `main`. Interactive follow-up items (cold device smoke, SW DevTools v5 check, `docker compose logs` PUT watch) are recommended before next client demo but are **not blocking** code delivery.
+
+**Remaining interactive verification checklist (client to confirm on live NAS):**
+- [ ] Hard-refresh an existing device ? SW should upgrade to `calvybots-v5` in DevTools Application ? Cache Storage.
+- [ ] Open dashboard on a new/private device or incognito ? should load server state (no bad PUT with `widgetsCount: 3` / `bodyBytes: ~916`).
+- [ ] `docker compose logs --follow api` during new-device cold load ? confirm no spurious PUT before any user edit.
+- [ ] `GET /api/widgets` after new-device load returns correct document (not reset to defaults).
+
 ### Client direction ? Widget sync 500 + EROFS follow-up (2026-05-13)
 
 **Status:** Delegate cycle reopened; backend diagnostics landed; environment remains blocked by EROFS until runtime writable path is confirmed.
@@ -646,3 +924,34 @@ docker compose logs --tail=40 api
   - observed backend write success log,
   - private window sees fresh server-backed widget payload.
 3. Return to QA pass once backend writes are confirmed.
+
+### Client direction ? To-Do color picker position drift (2026-05-13)
+
+**Status:** Conditionally closed; implementation complete, interactive runtime verification pending.
+
+**Priority:** P2 visual stability.
+
+**Client scope:** Fix color-picker anchoring regression in To-Do tasks where the panel drifts vertically relative to the clicked colour bar in normal, scrolled, or list-scrolled states.
+
+**Current assignment:** `team/assignments-todo-color-picker.md`
+
+**Primary files:** `js/widgets/todo.js`, `css/style.css`.
+
+**Execution notes:**
+
+- Preserve outside-click and focus-based close behavior.
+- Preserve keyboard/screen-reader interaction paths.
+- Preserve task color set/remove and task row action behavior.
+- Update `team/style-guide.md` only if user-visible pattern/token behavior changes.
+
+**Team Lead execution status:**
+
+- **Frontend completion:** `js/widgets/todo.js` and `css/style.css` changes are in place.
+- **QA (`qa-engineer`):** Pass with notes from static review.
+- **Interactive follow-up:** Manual runtime confirmation remains required for vertical alignment/stability under page and list scroll and close-path behavior under live interaction.
+
+**Next step (Team Lead):** keep this cycle conditionally closed until manual smoke verification confirms:
+
+1. Picker opens directly under the clicked color bar in static and scrolled states.
+2. Open menu remains vertically stable while dashboard/list scrolling.
+3. Outside-click and keyboard/Escape close paths still close correctly.

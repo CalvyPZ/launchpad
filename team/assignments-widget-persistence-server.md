@@ -22,6 +22,17 @@
 4. Confirm operational limits for payload growth and request size (Nginx body size if needed).
 5. Keep `/api/` no-cache compatible and existing PWA/SW compatibility intact.
 
+### Compose persistence compromise note (2026-05-13)
+
+- Host `/mnt/data/web_app/data` is treated as a read-only seed source to satisfy shared read-only storage constraints.
+- Runtime writes use a compose-backed named volume `web_app_api_data` mounted at `/data`.
+- Bootstrap behavior in `docker-compose.yml`:
+  - if `/data/widgets.json` does not exist and `/seed-data/widgets.json` exists, copy once into `/data/widgets.json`;
+  - if `/data/widgets.json` already exists, no overwrite occurs.
+- This preserves existing data across `docker compose restart api` and `docker compose down && up -d`.
+- Recovery tradeoff: host `/mnt/data/web_app/data/widgets.json` is no longer the live write target; it remains the source snapshot only.
+- Export/backup now targets the named Docker volume (or a one-time seeded copy back to host).
+
 ### Files
 
 - `api/server.js`

@@ -2,7 +2,9 @@ import {
   loadWidgetsDocument,
   saveWidgets,
   loadToolsWidgets,
+  loadToolsLandingWidgets,
   saveToolsWidgets,
+  saveToolsLandingWidgets,
   loadSiteTitle,
   saveSiteTitle,
   defaultNotesState,
@@ -11,9 +13,9 @@ import {
   getWidgetPayloadForApi,
   loadWidgetPayloadFromApi,
   normaliseWidgetRows,
+  normaliseToolsRows,
   migrateLegacyIfNeeded,
 } from "./store.js";
-import * as clockWidget from "./widgets/clock.js";
 import * as notesWidget from "./widgets/notes.js";
 import * as todoWidget from "./widgets/todo.js";
 import * as placeholderWidget from "./widgets/placeholder.js";
@@ -26,9 +28,8 @@ import {
   reportWidgetSyncPushEvent,
 } from "./site-diagnostics.js";
 
-const widgetTypes = ["clock", "notes", "todo"];
+const widgetTypes = ["notes", "todo"];
 const widgetFactories = {
-  clock: clockWidget.render,
   notes: notesWidget.render,
   todo: todoWidget.render,
 };
@@ -103,7 +104,6 @@ function pickServerPayload(raw) {
 }
 
 const addWidgetChoices = [
-  { type: "clock", label: "Clock", icon: "🕐" },
   { type: "notes", label: "Sticky Notes", icon: "📝" },
   { type: "todo", label: "To-Do", icon: "✅" },
 ];
@@ -121,7 +121,6 @@ const toolsAddWidgetChoices = [
 ];
 
 const widgetLabels = {
-  clock: "Clock",
   notes: "Sticky Notes",
   todo: "To-Do",
   "status-tools": "Status",
@@ -132,9 +131,9 @@ const widgetLabels = {
 function nowClockText() {
   const now = new Date();
   const clockTime = now.toLocaleTimeString("en-US", {
+    hour12: false,
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
   });
   const date = now.toLocaleDateString("en-US", {
     weekday: "short",
@@ -142,6 +141,13 @@ function nowClockText() {
     day: "numeric",
   });
   return { clockTime, date };
+}
+
+function removeDeprecatedHomeWidgets(rawWidgets) {
+  if (!Array.isArray(rawWidgets)) return [];
+  return rawWidgets
+    .filter((widget) => widget?.type !== "clock")
+    .map((widget, index) => ({ ...widget, position: index }));
 }
 
 function makeWidgetId(type) {
@@ -158,6 +164,9 @@ document.addEventListener("alpine:init", () => {
   const resizeObservers = new Map();
   const toolsControllers = new Map();
   const toolsResizeObservers = new Map();
+  const debugControllers = new Map();
+  const debugResizeObservers = new Map();
+  const pageKeys = new Set(["home", "tools", "debug"]);
     const widgetDragState = {
       active: false,
       pointerId: null,
@@ -184,8 +193,8 @@ document.addEventListener("alpine:init", () => {
     addWidgetPickerIndex: -1,
     widgets: [],
     toolsWidgets: [],
+    toolsLandingWidgets: [],
     currentPage: "home",
-    clockTitle: "",
     online: typeof navigator !== "undefined" ? navigator.onLine : true,
     _widgetsSyncTimer: null,
     _widgetsSyncPushTimer: null,
@@ -210,6 +219,7 @@ document.addEventListener("alpine:init", () => {
     _initialServerSyncInFlight: false,
     widgetMapEl: null,
     toolsGridEl: null,
+    debugGridEl: null,
     _pendingWidgetFocusId: null,
     _pendingWidgetFocusPage: "home",
     _todoResetTicker: null,
@@ -222,7 +232,7 @@ document.addEventListener("alpine:init", () => {
     _isExiting: false,
 
     navigateTo(page) {
-      const next = page === "tools" ? "tools" : "home";
+      const next = pageKeys.has(page) ? page : "home";
       this.currentPage = next;
       this.closeAddWidgetPicker(false);
     },
@@ -237,9 +247,14 @@ document.addEventListener("alpine:init", () => {
       this.persistWidgetsDeferredSync();
     },
 
+    persistToolsLandingWidgets() {
+      saveToolsLandingWidgets(this.toolsLandingWidgets);
+    },
+
     init() {
       this.widgetMapEl = this.$refs?.widgetGrid || document.getElementById("widget-grid");
       this.toolsGridEl = this.$refs?.toolsGrid || document.getElementById("tools-grid");
+      this.debugGridEl = this.$refs?.debugGrid || document.getElementById("debug-grid");
       initSiteDiagnostics();
       this._onlineHandler = () => {
         this.online = true;
@@ -277,20 +292,27 @@ document.addEventListener("alpine:init", () => {
       this.refreshClock();
 
       const localDocument = loadWidgetsDocument();
-      this.widgets = localDocument.widgets;
+      this.widgets = removeDeprecatedHomeWidgets(localDocument.widgets);
       this._widgetsUpdatedAt = localDocument.updatedAt;
+      if (this.widgets.length !== localDocument.widgets.length) {
+        this.persistWidgets({ sync: false });
+      }
 
       this.toolsWidgets = loadToolsWidgets();
+      this.toolsLandingWidgets = loadToolsLandingWidgets();
       this._visibilityHandler = () => {
         if (document.visibilityState === "visible") {
           let changed = false;
           if (evaluateAllTodoResets(this.widgets)) changed = true;
           if (evaluateAllTodoResets(this.toolsWidgets)) changed = true;
+          if (evaluateAllTodoResets(this.toolsLandingWidgets)) changed = true;
           if (changed) {
             this.persistWidgets();
             this.persistToolsWidgets();
+            this.persistToolsLandingWidgets();
             this.renderPageWidgets("home");
             this.renderPageWidgets("tools");
+            this.renderPageWidgets("debug");
           }
           if (this._widgetsNeedSync && this.online) {
             void this.syncToServer();
@@ -310,8 +332,10 @@ document.addEventListener("alpine:init", () => {
       document.addEventListener("visibilitychange", this._visibilityHandler);
       this.renderPageWidgets("home");
       this.renderPageWidgets("tools");
+      this.renderPageWidgets("debug");
       this.persistWidgets({ sync: false });
       this.persistToolsWidgets({ sync: false });
+      this.persistToolsLandingWidgets();
       if (this._clockTicker) window.clearInterval(this._clockTicker);
       this._clockTicker = window.setInterval(() => this.refreshClock(), 1000);
       void this.reconcileServerWidgets("init");
@@ -431,6 +455,7 @@ document.addEventListener("alpine:init", () => {
         if (any) {
           this.renderPageWidgets("home");
           this.renderPageWidgets("tools");
+          this.renderPageWidgets("debug");
         }
       }, 60000);
     },
@@ -656,7 +681,7 @@ document.addEventListener("alpine:init", () => {
       // - keep local when local is newer.
       // - prefer remote when remote is newer or markers are absent.
       const applyRemotePayload = () => {
-        if (remoteWidgets) this.widgets = remoteWidgets;
+        if (remoteWidgets) this.widgets = removeDeprecatedHomeWidgets(remoteWidgets);
         if (remoteToolsWidgets) this.toolsWidgets = remoteToolsWidgets;
         evaluateAllTodoResets(this.widgets);
         evaluateAllTodoResets(this.toolsWidgets);
@@ -666,6 +691,7 @@ document.addEventListener("alpine:init", () => {
         this.persistToolsWidgets({ sync: false });
         this.renderPageWidgets("home");
         this.renderPageWidgets("tools");
+        this.renderPageWidgets("debug");
       };
 
       if (hasRemoteTs && hasLocalTs && compare < 0) {
@@ -674,6 +700,7 @@ document.addEventListener("alpine:init", () => {
         this.persistToolsWidgets({ sync: true });
         this.renderPageWidgets("home");
         this.renderPageWidgets("tools");
+        this.renderPageWidgets("debug");
         return;
       }
 
@@ -871,6 +898,13 @@ document.addEventListener("alpine:init", () => {
         .map((widget, index) => ({ ...widget, position: index }));
     },
 
+    normalizeToolsLandingWidgets() {
+      this.toolsLandingWidgets = this.toolsLandingWidgets
+        .slice()
+        .sort((a, b) => a.position - b.position)
+        .map((widget, index) => ({ ...widget, position: index }));
+    },
+
     normalizeToolsWidgets() {
       this.toolsWidgets = this.toolsWidgets
         .slice()
@@ -880,19 +914,33 @@ document.addEventListener("alpine:init", () => {
 
     renderPageWidgets(pageKey) {
       const isHome = pageKey === "home";
+      const isTools = pageKey === "tools";
+      const isDebug = pageKey === "debug";
+      if (!isHome && !isTools && !isDebug) return;
       const widgetMap = isHome
         ? this.widgetMapEl || document.getElementById("widget-grid")
-        : this.toolsGridEl || document.getElementById("tools-grid");
+        : isTools
+          ? this.toolsGridEl || document.getElementById("tools-grid")
+          : this.debugGridEl || document.getElementById("debug-grid");
       if (!widgetMap) return;
 
-      const ctrls = isHome ? controllers : toolsControllers;
-      const ros = isHome ? resizeObservers : toolsResizeObservers;
+      if (isTools && (!Array.isArray(this.toolsLandingWidgets) || this.toolsLandingWidgets.length === 0)) {
+        this.toolsLandingWidgets = loadToolsLandingWidgets();
+        this.persistToolsLandingWidgets();
+      }
+      const ctrls = isHome ? controllers : isTools ? toolsControllers : debugControllers;
+      const ros = isHome ? resizeObservers : isTools ? toolsResizeObservers : debugResizeObservers;
       const factories = isHome ? widgetFactories : toolsWidgetFactories;
 
       if (isHome) this.normalizeWidgets();
-      else this.normalizeToolsWidgets();
+      if (isTools) this.normalizeToolsLandingWidgets();
+      if (isDebug) this.normalizeToolsWidgets();
 
-      const widgetsList = isHome ? this.widgets : this.toolsWidgets;
+      const widgetsList = isHome
+        ? this.widgets
+        : isTools
+          ? this.toolsLandingWidgets
+          : this.toolsWidgets;
 
       widgetMap.classList.add("widget-enter");
       widgetMap.innerHTML = "";
@@ -942,12 +990,17 @@ document.addEventListener("alpine:init", () => {
           titleInput.setAttribute("aria-label", "Widget name");
           let titleTimer = null;
           const saveTitle = () => {
-            const list = isHome ? this.widgets : this.toolsWidgets;
+            const list = isHome
+              ? this.widgets
+              : isTools
+                ? this.toolsLandingWidgets
+                : this.toolsWidgets;
             const idx = list.findIndex((w) => w.id === config.id);
             if (idx < 0) return;
             list[idx].title = titleInput.value.trim();
             if (isHome) this.persistWidgets();
-            else this.persistToolsWidgets();
+            else if (isDebug) this.persistToolsWidgets();
+            else if (isTools) this.persistToolsLandingWidgets();
           };
           titleInput.addEventListener("blur", saveTitle);
           titleInput.addEventListener("input", () => {
@@ -1014,7 +1067,11 @@ document.addEventListener("alpine:init", () => {
               const rect = shell.getBoundingClientRect();
               const w = Math.round(rect.width);
               const h = Math.round(rect.height);
-              const list = isHome ? this.widgets : this.toolsWidgets;
+              const list = isHome
+                ? this.widgets
+                : isTools
+                  ? this.toolsLandingWidgets
+                  : this.toolsWidgets;
               const idx = list.findIndex((item) => item.id === config.id);
               if (idx < 0) return;
               const prev = list[idx];
@@ -1024,7 +1081,8 @@ document.addEventListener("alpine:init", () => {
               list[idx].minWidth = minW;
               list[idx].minHeight = minH;
               if (isHome) this.persistWidgets();
-              else this.persistToolsWidgets();
+              else if (isDebug) this.persistToolsWidgets();
+              else if (isTools) this.persistToolsLandingWidgets();
             }, 280);
           });
           ro.observe(moduleNode);
@@ -1047,6 +1105,7 @@ document.addEventListener("alpine:init", () => {
     renderWidgets() {
       this.renderPageWidgets("home");
       this.renderPageWidgets("tools");
+      this.renderPageWidgets("debug");
     },
 
     onWidgetPointerDown(event) {
@@ -1056,7 +1115,7 @@ document.addEventListener("alpine:init", () => {
       const shell = handle.closest(".dash-widget");
       if (!(shell instanceof HTMLElement)) return;
       const widgetMap =
-        shell.closest("#widget-grid") || shell.closest("#tools-grid");
+        shell.closest("#widget-grid") || shell.closest("#tools-grid") || shell.closest("#debug-grid");
       if (!(widgetMap instanceof HTMLElement)) return;
       const sourceWidgetId = shell.dataset.widgetId;
       if (!sourceWidgetId) return;
@@ -1098,7 +1157,8 @@ document.addEventListener("alpine:init", () => {
     },
 
     getAddWidgetPickerOptions() {
-      if (this.currentPage === "tools") return toolsAddWidgetChoices;
+      if (this.currentPage === "debug") return toolsAddWidgetChoices;
+      if (this.currentPage === "tools") return [];
       return this.addWidgetChoices || [];
     },
 
@@ -1238,10 +1298,14 @@ document.addEventListener("alpine:init", () => {
       const shell = handle.closest(".dash-widget");
       if (!(shell instanceof HTMLElement)) return;
       const widgetMap =
-        shell.closest("#widget-grid") || shell.closest("#tools-grid");
+        shell.closest("#widget-grid") || shell.closest("#tools-grid") || shell.closest("#debug-grid");
       if (!(widgetMap instanceof HTMLElement)) return;
-      const pageKey = widgetMap.id === "tools-grid" ? "tools" : "home";
-      const list = pageKey === "tools" ? this.toolsWidgets : this.widgets;
+      const pageKey = widgetMap.id === "debug-grid" ? "debug" : widgetMap.id === "tools-grid" ? "tools" : "home";
+      const list = pageKey === "home"
+        ? this.widgets
+        : pageKey === "tools"
+          ? this.toolsLandingWidgets
+          : this.toolsWidgets;
       const sourceId = shell.dataset.widgetId;
       if (!sourceId) return;
       const currentIndex = list.findIndex((widget) => widget.id === sourceId);
@@ -1277,7 +1341,10 @@ document.addEventListener("alpine:init", () => {
     },
 
     moveWidgetByIndex(sourceId, targetIndex, pageKey) {
-      const list = pageKey === "tools" ? this.toolsWidgets : this.widgets;
+      const list =
+        pageKey === "home" ? this.widgets
+          : pageKey === "tools" ? this.toolsLandingWidgets
+            : this.toolsWidgets;
       const sourceIndex = list.findIndex((widget) => widget.id === sourceId);
       if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= list.length) return;
       if (sourceIndex === targetIndex) return;
@@ -1286,9 +1353,13 @@ document.addEventListener("alpine:init", () => {
       const insertAt = targetIndex < sourceIndex ? targetIndex : targetIndex;
       nextOrder.splice(insertAt, 0, moved);
       if (pageKey === "tools") {
+        this.toolsLandingWidgets = nextOrder;
+        this.persistToolsLandingWidgets();
+        this.renderPageWidgets("tools");
+      } else if (pageKey === "debug") {
         this.toolsWidgets = nextOrder;
         this.persistToolsWidgets();
-        this.renderPageWidgets("tools");
+        this.renderPageWidgets("debug");
       } else {
         this.widgets = nextOrder;
         this.persistWidgets();
@@ -1357,10 +1428,16 @@ document.addEventListener("alpine:init", () => {
       const requestedIndex = widgetDragState.dropIndex;
       const gridEl = widgetDragState.gridEl;
       const isTools = gridEl?.id === "tools-grid";
+      const isDebug = gridEl?.id === "debug-grid";
+      const isHome = gridEl?.id === "widget-grid";
 
       let committed = false;
       if (targetWidgetId && sourceWidgetId && sourceWidgetId !== targetWidgetId && Number.isFinite(requestedIndex)) {
-        const list = isTools ? this.toolsWidgets : this.widgets;
+        const list = isHome
+          ? this.widgets
+          : isTools
+          ? this.toolsLandingWidgets
+          : this.toolsWidgets;
         const nextOrder = list.slice();
         const fromIndex = nextOrder.findIndex((widget) => widget.id === sourceWidgetId);
         const targetBaseIndex = requestedIndex > nextOrder.length ? nextOrder.length : requestedIndex;
@@ -1373,12 +1450,20 @@ document.addEventListener("alpine:init", () => {
           if (insertAt < 0) insertAt = 0;
           if (insertAt > nextOrder.length) insertAt = nextOrder.length;
           nextOrder.splice(insertAt, 0, moved);
-          const prevOrder = isTools ? this.toolsWidgets : this.widgets;
+          const prevOrder = isHome
+            ? this.widgets
+            : isTools
+            ? this.toolsLandingWidgets
+            : this.toolsWidgets;
           if (JSON.stringify(nextOrder) !== JSON.stringify(prevOrder)) {
             if (isTools) {
+              this.toolsLandingWidgets = nextOrder;
+              this.persistToolsLandingWidgets();
+              this.renderPageWidgets("tools");
+            } else if (isDebug) {
               this.toolsWidgets = nextOrder;
               this.persistToolsWidgets();
-              this.renderPageWidgets("tools");
+              this.renderPageWidgets("debug");
             } else {
               this.widgets = nextOrder;
               this.persistWidgets();
@@ -1479,12 +1564,13 @@ document.addEventListener("alpine:init", () => {
       document.body.classList.toggle("edit-mode", this.editMode);
       this.renderPageWidgets("home");
       this.renderPageWidgets("tools");
+      this.renderPageWidgets("debug");
     },
 
     addWidget(type, returnFocus = true) {
       if (!this.editMode) return false;
       let added = false;
-      if (this.currentPage === "tools") {
+      if (this.currentPage === "debug") {
         if (!toolsWidgetTypeSet.has(type)) return false;
         const nextPosition = this.toolsWidgets.length;
         const next = {
@@ -1500,8 +1586,10 @@ document.addEventListener("alpine:init", () => {
         };
         this.toolsWidgets = [...this.toolsWidgets, next];
         this.persistToolsWidgets();
-        this.renderPageWidgets("tools");
+        this.renderPageWidgets("debug");
         added = true;
+      } else if (this.currentPage === "tools") {
+        return false;
       } else {
         if (!widgetTypeSet.has(type)) return false;
         const nextPosition = this.widgets.length;
@@ -1536,19 +1624,27 @@ document.addEventListener("alpine:init", () => {
     removeWidget(widgetId, pageKey) {
       if (!this.editMode) return;
       let resolved = pageKey;
-      if (resolved !== "home" && resolved !== "tools") {
+      if (resolved !== "home" && resolved !== "tools" && resolved !== "debug") {
         if (this.widgets.some((item) => item.id === widgetId)) resolved = "home";
-        else if (this.toolsWidgets.some((item) => item.id === widgetId)) resolved = "tools";
+        else if (this.toolsLandingWidgets.some((item) => item.id === widgetId)) resolved = "tools";
+        else if (this.toolsWidgets.some((item) => item.id === widgetId)) resolved = "debug";
         else return;
       }
       if (resolved === "home") {
         this.widgets = this.widgets.filter((item) => item.id !== widgetId);
         this.persistWidgets();
         this.renderPageWidgets("home");
+      } else if (resolved === "tools") {
+        this.toolsLandingWidgets = this.toolsLandingWidgets.filter((item) => item.id !== widgetId);
+        this.toolsLandingWidgets = this.toolsLandingWidgets.length
+          ? this.toolsLandingWidgets
+          : loadToolsLandingWidgets();
+        this.persistToolsLandingWidgets();
+        this.renderPageWidgets("tools");
       } else {
         this.toolsWidgets = this.toolsWidgets.filter((item) => item.id !== widgetId);
         this.persistToolsWidgets();
-        this.renderPageWidgets("tools");
+        this.renderPageWidgets("debug");
       }
     },
 

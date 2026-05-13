@@ -23,9 +23,8 @@ const path = require('path');
 const PORT = Number(process.env.PORT) || 3000;
 const CONFIG_PATH = path.resolve(__dirname, '..', 'data', 'config.json');
 const WIDGETS_PATH = path.resolve(__dirname, '..', 'data', 'widgets.json');
+const WIDGETS_DIR = path.dirname(WIDGETS_PATH);
 const fsp = fs.promises;
-
-console.log('[api] WIDGETS_PATH resolved to:', WIDGETS_PATH);
 const startTime = Date.now();
 
 const WIDGETS_SCHEMA_VERSION = 2;
@@ -263,6 +262,46 @@ function parseWidgetRowsPayload(payload, key, options = {}) {
   return { ok: true, value: normalizedRows };
 }
 
+async function ensureWidgetsStorageAccessible() {
+  console.log('[api] Checking widgets storage path:', WIDGETS_DIR);
+  try {
+    await fsp.mkdir(WIDGETS_DIR, { recursive: true });
+    const dirStats = await fsp.stat(WIDGETS_DIR);
+    await fsp.access(WIDGETS_DIR, fs.constants.W_OK);
+    console.log('[api] Widgets directory writable:', {
+      path: WIDGETS_DIR,
+      mode: `0${dirStats.mode.toString(8)}`,
+      uid: dirStats.uid,
+      gid: dirStats.gid,
+    });
+  } catch (error) {
+    console.error('[api] Widgets directory check failed:', {
+      path: WIDGETS_DIR,
+      code: error.code,
+      message: error.message,
+    });
+  }
+
+  try {
+    const fileStats = await fsp.stat(WIDGETS_PATH);
+    console.log('[api] Existing widgets.json detected:', {
+      path: WIDGETS_PATH,
+      size: fileStats.size,
+      mode: `0${fileStats.mode.toString(8)}`,
+      uid: fileStats.uid,
+      gid: fileStats.gid,
+    });
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.error('[api] widgets.json stat failed:', {
+        path: WIDGETS_PATH,
+        code: error.code,
+        message: error.message,
+      });
+    }
+  }
+}
+
 function parseAndNormalizeWidgetsPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return {
@@ -328,11 +367,23 @@ async function writeWidgetsAtomic(document) {
   const tmpPath = `${WIDGETS_PATH}.${process.pid}.${Date.now()}.tmp`;
   const payload = JSON.stringify(document);
   try {
+    await fsp.mkdir(WIDGETS_DIR, { recursive: true });
     await fsp.writeFile(tmpPath, payload, 'utf8');
     await fsp.rename(tmpPath, WIDGETS_PATH);
-    console.log('[api] writeWidgetsAtomic OK, wrote', WIDGETS_PATH);
+    console.log('[api] writeWidgetsAtomic OK', {
+      path: WIDGETS_PATH,
+      tmpPath,
+      bytes: Buffer.byteLength(payload),
+    });
   } catch (error) {
-    console.error('[api] writeWidgetsAtomic FAILED:', error);
+    console.error('[api] writeWidgetsAtomic FAILED', {
+      path: WIDGETS_PATH,
+      tmpPath,
+      bytes: Buffer.byteLength(payload),
+      code: error.code,
+      errno: error.errno,
+      message: error.message,
+    });
     throw error;
   } finally {
     await fsp.unlink(tmpPath).catch(() => undefined);
@@ -417,7 +468,6 @@ function handleConfig(res) {
 async function handleGetWidgets(res) {
   try {
     const doc = await readWidgetsFromDisk();
-    console.log('[api] GET /api/widgets → updatedAt:', doc.updatedAt);
     sendJson(res, 200, doc);
   } catch (error) {
     console.error('[api] Failed to read widgets:', error);
@@ -460,11 +510,26 @@ async function handlePutWidgets(req, res) {
       return;
     }
 
-    console.log('[api] PUT /api/widgets → persisting, payload updatedAt:', normalized.value.updatedAt);
+    console.log('[api] PUT /api/widgets ? payload accepted', {
+      schemaVersion: normalized.value.schemaVersion,
+      widgetsCount: normalized.value.widgets.length,
+      toolsWidgetsCount: normalized.value.toolsWidgets.length,
+      updatedAt: normalized.value.updatedAt,
+      path: WIDGETS_PATH,
+      bodyBytes: body.length,
+    });
     await queueWidgetPersist(normalized.value);
     sendJson(res, 200, normalized.value);
   } catch (error) {
     const status = error && Number.isInteger(error.status) ? error.status : 500;
+    console.error('[api] PUT /api/widgets FAILED', {
+      path: WIDGETS_PATH,
+      status,
+      code: error && error.code,
+      errno: error && error.errno,
+      message: error && error.message,
+      detail: error && error.detail,
+    });
     sendJson(res, status, {
       error: error && error.error ? error.error : 'Request failed',
       detail: error && error.detail ? error.detail : error.message,
@@ -528,6 +593,8 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`[api] CalvyBots API listening on port ${PORT}`);
 });
+
+void ensureWidgetsStorageAccessible();
 
 server.on('error', (err) => {
   console.error('[api] Server error:', err);

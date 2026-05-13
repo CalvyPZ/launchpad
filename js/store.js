@@ -69,9 +69,14 @@ const DEFAULT_WIDGETS = [
 const TOOLS_WIDGET_ID_STATUS = "widget-tools-status";
 const TOOLS_WIDGET_ID_LOG = "widget-tools-log";
 const TOOLS_LEGACY_PLACEHOLDER_ID = "widget-tools-placeholder";
+const TOOLS_TAB_PLACEHOLDER_ID = "widget-tools-tab-placeholder";
+const TOOLS_LANDING_WIDGETS_KEY = "calvybots_tools_landing_widgets";
 const DEFAULT_TOOLS_WIDGETS = [
   { id: TOOLS_WIDGET_ID_STATUS, type: "status-tools", position: 0 },
   { id: TOOLS_WIDGET_ID_LOG, type: "log-tools", position: 1 },
+];
+const DEFAULT_TOOLS_TAB_WIDGETS = [
+  { id: TOOLS_TAB_PLACEHOLDER_ID, type: "placeholder", position: 0 },
 ];
 const TOOL_WIDGET_TYPES = new Set(["status-tools", "log-tools", "placeholder"]);
 
@@ -374,7 +379,7 @@ function normalise(rawItems) {
   }));
 }
 
-function normaliseToolsRows(rawItems) {
+export function normaliseToolsRows(rawItems) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     return DEFAULT_TOOLS_WIDGETS.map((w, i) => ({
       ...w,
@@ -434,6 +439,52 @@ function normaliseToolsRows(rawItems) {
     ...item,
     position: index,
   }));
+}
+
+function normaliseToolsLandingRows(rawItems) {
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return DEFAULT_TOOLS_TAB_WIDGETS.map((w, i) => ({
+      ...w,
+      position: i,
+      visible: true,
+      minWidth: DEFAULT_MIN_WIDTH,
+      minHeight: DEFAULT_MIN_HEIGHT,
+    }));
+  }
+
+  const valid = rawItems
+    .map((item, index) => {
+      const type = typeof item?.type === "string" ? item.type : null;
+      if (type !== "placeholder") return null;
+      const id = String(item.id || `tools-tab-widget-${Date.now()}-${index}`);
+      const position = clampToNumber(item.position, index);
+      const visible = item.visible !== false;
+      const title = typeof item.title === "string" ? item.title : "";
+      const minWidth = clampToNumber(item.minWidth, DEFAULT_MIN_WIDTH);
+      const minHeight = clampToNumber(item.minHeight, DEFAULT_MIN_HEIGHT);
+      const width = item.width == null || item.width === "" ? null : clampToNumber(item.width, NaN);
+      const height = item.height == null || item.height === "" ? null : clampToNumber(item.height, NaN);
+      return {
+        id,
+        type,
+        position,
+        visible,
+        title,
+        minWidth,
+        minHeight,
+        width: width == null || Number.isNaN(width) ? null : width,
+        height: height == null || Number.isNaN(height) ? null : height,
+      };
+    })
+    .filter(Boolean)
+    .filter((item) => item.visible !== false)
+    .sort((a, b) => a.position - b.position);
+
+  if (!valid.length) {
+    return normaliseToolsLandingRows(null);
+  }
+
+  return valid.map((item, index) => ({ ...item, position: index }));
 }
 
 export function loadWidgets() {
@@ -531,6 +582,26 @@ export function loadToolsWidgets() {
   }
 }
 
+export function loadToolsLandingWidgets() {
+  try {
+    const stored = localStorage.getItem(TOOLS_LANDING_WIDGETS_KEY);
+    if (!stored) {
+      return normaliseToolsLandingRows(null);
+    }
+
+    const parsed = JSON.parse(stored);
+    const rawToolsLanding = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.toolsLandingWidgets)
+      ? parsed.toolsLandingWidgets
+      : null;
+    return normaliseToolsLandingRows(rawToolsLanding);
+  } catch (err) {
+    console.error("Failed to load tools landing widgets", err);
+    return normaliseToolsLandingRows(null);
+  }
+}
+
 export function saveToolsWidgets(widgets) {
   const payload = (widgets || [])
     .map((widget, index) => {
@@ -557,6 +628,30 @@ export function saveToolsWidgets(widgets) {
     })
     .sort((a, b) => a.position - b.position);
   localStorage.setItem(TOOLS_WIDGETS_KEY, JSON.stringify(payload));
+}
+
+export function saveToolsLandingWidgets(widgets) {
+  const payload = (widgets || [])
+    .map((widget, index) => ({
+      id: widget.id,
+      type: widget.type,
+      position: index,
+      visible: widget.visible !== false,
+      title: typeof widget.title === "string" ? widget.title : "",
+      minWidth: clampToNumber(widget.minWidth, DEFAULT_MIN_WIDTH),
+      minHeight: clampToNumber(widget.minHeight, DEFAULT_MIN_HEIGHT),
+      width:
+        widget.width == null || widget.width === "" ? null : clampToNumber(widget.width, NaN),
+      height:
+        widget.height == null || widget.height === "" ? null : clampToNumber(widget.height, NaN),
+    }))
+    .map((row) => ({
+      ...row,
+      width: row.width == null || Number.isNaN(row.width) ? null : row.width,
+      height: row.height == null || Number.isNaN(row.height) ? null : row.height,
+    }))
+    .sort((a, b) => a.position - b.position);
+  localStorage.setItem(TOOLS_LANDING_WIDGETS_KEY, JSON.stringify(payload));
 }
 
 const DEFAULT_SITE_TITLE = "Calvy Launchpad";

@@ -57,18 +57,35 @@
 - Hover actions use border-lightening + small lift.
 - Use `rgba` accents for subtle depth accents, avoid heavy bloom.
 
-## App shell navigation (Home / Tools)
+## Header shell + home controls toolbar
 
-- **Placement:** A compact **primary nav** sits directly under the site header (`nav.app-nav`), full width, `surface` background and `border` bottom edge (same band as header chrome).
+### Current header/edit behavior
+
+- Time/date is now a read-only readout in the header.
+- Time displays as `HH:MM` in 24h format with no seconds.
+- Date renders in smaller white text on the next line.
+- The Edit/Done control is now placed in the tab row; the edit action bar (`.home-toolbar`) renders below the nav.
+
+- Header is now minimal brand chrome: logo + live header clock/date readout in `header.site-header`; no inline editable title.
+- `clockTime` uses the large cyan `.header-clock-time` display, and `clockDate` uses smaller white `.header-clock-date` beneath it.
+- Edit controls are now in a dedicated toolbar below nav (`.home-toolbar` and `.home-toolbar-btn`) so action affordances are grouped and distinct from page navigation.
+- Edit/Done uses `.nav-tab` styling in navigation and Add Widget uses `.btn-primary` (`.home-toolbar-btn.btn-primary`) in the edit action row.
+- Edit-mode hint text is paired with the toolbar and references widget title fields for renaming.
+
+## App shell navigation (Home / Tools / Debug)
+
+- **Placement:** A compact **primary nav** sits above the edit controls row (`nav.app-nav`), full width, `surface` background and `border` bottom edge (same band as header chrome).
 - **Tabs:** `button.nav-tab` — uppercase, tracked label (`~0.8rem`, `font-weight: 500`), inactive `text-2`, active `text-1` with a **2px bottom border** in `accent` (`#2dd4bf`). Hover/focus raises label to `text-1` without a filled pill background.
 - **Semantics:** Tabs use `role="tablist"` / `role="tab"` with `aria-selected` and `tabindex` roving on the active tab only; each page panel uses `aria-hidden` when off-screen so assistive tech focuses the visible surface.
 - **Keyboard:** Tab into the tablist, activate with **Space** or **Enter**; **Arrow keys** are not wired for roving (optional follow-up).
+- Keep a dedicated **right-aligned** Debug tab (`ml-auto`) and place the Edit/Done tab/button immediately to the left of Debug.
+- Edit mode uses `nav-tab` visual style and an adjacent content row (`.home-toolbar`) for secondary edit actions.
 
-## Page transition (Home ↔ Tools)
+## Page transition (Home / Tools / Debug)
 
-- **Mechanism:** A horizontal **track** (`.pages-track`, `width: 200%`) holds two **panels** (`.page-panel`, `width: 50%` each) inside a clipping **viewport** (`.pages-viewport`, `overflow: hidden`). Switching pages toggles a modifier class: **Home** → `transform: translateX(0)`; **Tools** → `transform: translateX(-50%)` (half the track width = one viewport).
+- **Mechanism:** A horizontal **track** (`.pages-track`, `width: 300%`) holds three **panels** (`.page-panel`, `width: 33.333%` each) inside a clipping **viewport** (`.pages-viewport`, `overflow: hidden`). Switching pages toggles a modifier class: **Home** → `transform: translateX(0)`; **Tools** → `transform: translateX(-33.333333%)`; **Debug** → `transform: translateX(-66.666667%)` (one panel per viewport width).
 - **Motion:** `320ms` `cubic-bezier(0.4, 0, 0.2, 1)` on `transform` only — calm, not intrusive; no full document navigation or reload.
-- **State:** Page choice is client-side only (`currentPage` on the Alpine root); each page owns its widget list and **separate** `localStorage` (`calvybots_widgets` vs `calvybots_tools_widgets`).
+- **State:** Page choice is client-side only (`currentPage` on the Alpine root); each page owns its widget list and separate `localStorage` keys (`calvybots_widgets`, `calvybots_tools_widgets`, `calvybots_tools_landing_widgets`).
 
 ## Component patterns
 
@@ -77,6 +94,15 @@
 - Soft button: dark neutral gradient + border.
 - Inputs: dark background, high contrast focus outline.
 - Widget shell: title and controls stay inside each widget.
+
+## Header toolbar controls
+
+- Header uses a dedicated action bar (`.home-toolbar`) directly under the tab row (visible only in edit mode).
+- `Done` and `Add Widget` actions use shared shell control tokens:
+  - Edit/Done uses `nav-tab` state in `nav.app-nav`; the toolbar contains add-widget controls only.
+  - `.home-toolbar-btn.btn-primary` for Add Widget.
+- Toolbar utilities use cyan (`#2dd4bf`) as the accent and preserve 42px minimum touch target behavior.
+- Edit mode guidance text (`.edit-mode-hint`) should be in-band with toolbar controls and reflect current edit behavior.
 
 ## Interaction
 
@@ -114,6 +140,18 @@
   - `icons`
 - `apple-mobile-web-app-capable` metadata should be available.
 - Add safe-area padding in shell and layout containers using `env(safe-area-inset-*)` with non-safe-area fallbacks.
+
+## Footer debug strip (widget sync state)
+
+- The footer now displays a live sync debug strip inside the existing `x-data="launchpad"` shell.
+- The strip surfaces:
+  - last successful sync timestamp (GET and PUT),
+  - current local sync state (`synced`, `pending`, `uploading`),
+  - next outbound attempt countdown (`debounced` countdown vs periodic retry interval),
+  - last outbound outcome (`success`, `queued`, `failed`, `skipped`),
+  - retrieve policy as explicit `bootstrap-only / not currently polling` text.
+- Visual treatment uses the existing cyan token family on dark UI surfaces and adds no new purple/violet active accents.
+- Debug strip is only rendered when `currentPage === 'debug'`.
 
 ## To-Do widget (v4)
 

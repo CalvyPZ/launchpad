@@ -197,3 +197,24 @@ Leave blank until QA executes against a candidate build; Team Lead updates prior
 **Close recommendation**
 
 - Remediation cycle re-check is complete for static verification and is ready for Team Lead sign-off, with only the previously defined interactive follow-ups remaining.
+
+### Verdict — QA remediation cycle 5 — focus-state + nav-tab follow-up (2026-05-13)
+
+**Pass with notes.**
+
+**Scope verified:** `team/assignments-qa-remediation-v3.md` against `css/style.css` focus/edit controls and body font-stack alignment (`team/style-guide.md`).
+
+**Findings:**
+
+- **Pass:** `.dash-widget.editable`, `.widget-handle`, `.widget-remove`, `.note-area:focus-visible`, `.search-input:focus` / `.search-input:focus-visible` / `select.search-input:focus`, `.widget-title-input:focus-visible` use cyan (`#2dd4bf`) accents only in the touched selectors.
+- **Pass:** `.nav-tab` minimum height is `42px` in normal and focus states (`42px` on base `.nav-tab` rule).
+- **Pass:** `body` font-family is `Outfit`-first and matches `index.html` Tailwind font token stack.
+
+**Interactive follow-up (required):**
+
+1. Confirm keyboard-visible focus rings for `.nav-tab`, `.widget-handle`, `.widget-remove`, `.note-area`, `.search-input`, and `.widget-title-input` in Firefox and Safari.
+2. Confirm touch/focus targets feel reachable at mobile widths during real navigation/edit toggles.
+
+### Recommendation
+
+**Approved for this remediation scope**, with no blocking findings and no new risk identified from static review; pending short interactive keyboard pass to complete launch readiness.

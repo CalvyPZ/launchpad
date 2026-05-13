@@ -8,6 +8,7 @@ const PROBE_INTERVAL_MS = 60_000;
 const FETCH_TIMEOUT_MS = 5000;
 const ALPINE_PROBE_URL = "https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js";
 const SENTINEL_KEY = "calvybots_diag_sentinel";
+const SW_CONTROLLER_WAIT_MS = 2_500;
 
 /** @typedef {{ ts: string, level: 'log'|'info'|'warn'|'error', source: string, message: string, detail?: string }} LogEntry */
 /** @typedef {{ id: string, label: string, status: 'ok'|'warn'|'crit', detail: string, at: string }} ProbeResult */
@@ -40,6 +41,7 @@ let probeIntervalId = null;
 let consoleSilent = false;
 /** @type {{ warn: typeof console.warn, error: typeof console.error } | null} */
 let origConsole = null;
+let swControllerPendingStateSeen = false;
 
 function isoNow() {
   return new Date().toISOString();
@@ -133,6 +135,42 @@ async function probeDocument() {
 }
 
 /** @returns {Promise<ProbeResult>} */
+async function waitForServiceWorkerControl(maxWaitMs = SW_CONTROLLER_WAIT_MS) {
+  if (navigator.serviceWorker.controller) return true;
+
+  let settled = false;
+  let timerId = null;
+
+  return new Promise((resolve) => {
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      if (timerId != null) window.clearTimeout(timerId);
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      resolve(value);
+    };
+
+    const onControllerChange = () => {
+      done(Boolean(navigator.serviceWorker.controller));
+    };
+
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+
+    navigator.serviceWorker.ready
+      .then(() => {
+        done(Boolean(navigator.serviceWorker.controller));
+      })
+      .catch(() => {
+        done(false);
+      });
+
+    timerId = window.setTimeout(() => {
+      done(false);
+    }, maxWaitMs);
+  });
+}
+
+/** @returns {Promise<ProbeResult>} */
 async function probeServiceWorker() {
   const at = isoNow();
   if (!("serviceWorker" in navigator)) {
@@ -156,11 +194,25 @@ async function probeServiceWorker() {
       };
     }
     if (!navigator.serviceWorker.controller) {
+      const becameController = await waitForServiceWorkerControl();
+      if (becameController) {
+        return { id: "sw", label: "Service worker", status: "ok", detail: "Control handoff complete", at };
+      }
+      if (!swControllerPendingStateSeen) {
+        swControllerPendingStateSeen = true;
+        return {
+          id: "sw",
+          label: "Service worker",
+          status: "ok",
+          detail: "Registered, control pending for this first load.",
+          at,
+        };
+      }
       return {
         id: "sw",
         label: "Service worker",
         status: "warn",
-        detail: "Registered but not controlling this page yet.",
+        detail: "Registered but not controlling this page yet after startup grace.",
         at,
       };
     }

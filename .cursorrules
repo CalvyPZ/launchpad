@@ -125,6 +125,16 @@ Legacy keys `calvybots_notes` and `calvybots_todo` must be migrated via `migrate
 
 ## Process and documentation rules
 
+## Commit eligibility policy (runtime vs source)
+
+By default, commit any repo file that is part of the deliverable, including source files (`index.html`, `js/*.js`, `css/*.css`), markdown, agent/process docs, and `.cursor` setup files.
+
+Do **not** commit live runtime data/state files. Runtime data includes anything generated or mutated by running services, including browser `localStorage` state and runtime persistence outputs.
+
+In this repository, the tracked runtime-exclusion example is `data/widgets.json`; keep it out of normal feature commits and document any replacement runtime data path before it is reintroduced.
+
+If a file’s role changes from seed/config to live runtime, the Team Lead must update its classification in docs before commits.
+
 - **Source of truth for product direction:** `team/brief.md`, `team/delegation-v4.md`, `team/lead-status.md`.
 - **Style tokens source of truth:** `team/style-guide.md` (currently v3; update to v4 when cyan token pass is complete).
 - **QA sign-off artifacts:** `team/qa-complete-v4.md`, `team/qa-status.md`, `tests/test-plan.md`, `tests/usability-checklist.md`.
