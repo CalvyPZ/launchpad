@@ -4,26 +4,84 @@
 
 ### Project overview
 
-CalvyBots Launchpad is a **static-first** personal dashboard (no build step, no bundler, no TypeScript). See `.cursorrules` for full architecture and constraints. Key rules: **no Python**, **no test frameworks**, **no npm install for the frontend**.
+CalvyBots Launchpad is a **static-first** personal dashboard — no build step, no bundler, no TypeScript. See `.cursorrules` for the full architecture and constraints. Key hard rules: **no Python**, **no test frameworks**, **no npm install for the frontend**, **no README files** unless explicitly requested.
 
-### Services
+### Team structure
 
-| Service | Command | Port | Notes |
-|---------|---------|------|-------|
-| **nginx** (static server) | `sudo nginx` (stop: `sudo nginx -s stop`) | 8033 | Serves all static files from `/workspace`; proxies `/api/` to port 3000. Uses config linked at `/etc/nginx/sites-enabled/launchpad.conf` → `/workspace/nginx-site.local.conf`. The nginx `root` is symlinked: `/usr/share/nginx/html` → `/workspace`. |
-| **API sidecar** | `cd /workspace/api && node server.js` | 3000 | Zero npm dependencies. Provides `GET /api/health`, `/api/system`, `/api/config`. Optional — frontend works without it. |
+Five subagents are defined in `.cursor/agents/`. See `.cursor/rules/workflow-and-process.mdc` for invocation rules.
 
-### Starting the dev environment
+| Agent | File | Subagent type | Scope |
+|-------|------|---------------|-------|
+| Team Lead | `.cursor/agents/team-lead.md` | `team-lead` | Prioritisation, delegation, `team/` docs |
+| Frontend Dev | `.cursor/agents/frontend-senior-dev.md` | `frontend-senior-dev` | UI, widgets, store, CSS, PWA frontend |
+| Backend Dev | `.cursor/agents/backend-senior-dev.md` | `backend-senior-dev` | nginx, sw.js, manifest, MIME, `/api/` |
+| QA | `.cursor/agents/qa-engineer.md` | `qa-engineer` | QA verdicts, checklists, sign-off |
+| Cleanup | `.cursor/agents/senior-cleanup-engineer.md` | `senior-cleanup-engineer` | **Client-only** — never invoke autonomously |
 
-1. Start the API sidecar: `cd /workspace/api && PORT=3000 node server.js &`
-2. Start nginx: `sudo nginx`
-3. Open `http://localhost:8033` in Chrome.
+### Production stack
+
+The app runs on Docker Compose at port 8033, typically behind a Cloudflare tunnel on the production Ubuntu server.
+
+| Service | Container | Image | Port |
+|---------|-----------|-------|------|
+| nginx (static + reverse proxy) | `web_app` | `nginx:alpine` | 8033→80 |
+| API sidecar | `web_app_api` | `node:20-alpine` | 3000 (internal) |
+
+### Starting the production Docker stack
+
+```bash
+# Ensure Docker daemon is running
+sudo dockerd &>/dev/null &
+sleep 3
+
+# Symlink workspace to production volume path
+sudo mkdir -p /mnt/data && sudo ln -sf /workspace /mnt/data/web_app
+
+# Start
+cd /workspace && sudo docker compose up -d
+
+# Verify
+sudo docker compose ps
+curl -sf http://localhost:8033/
+curl -sf http://localhost:8033/api/health
+```
+
+### Alternative: local nginx dev server (no Docker)
+
+```bash
+cd /workspace/api && PORT=3000 node server.js &
+sudo nginx
+# App at http://localhost:8033
+```
+
+Requires the update script to have run (sets up nginx config symlink and web root symlink).
 
 ### Gotchas
 
-- The `nginx-site.local.conf` has `root /usr/share/nginx/html` which is symlinked to `/workspace` during setup. If nginx returns 403/404, verify the symlink: `ls -la /usr/share/nginx/html`.
-- The default nginx site config at `/etc/nginx/sites-enabled/default` must be removed so it does not conflict with port 80. The launchpad config listens on port 8033.
-- The API sidecar reads `/workspace/data/config.json` (one directory up from `api/`). If you get 500 errors on `/api/config`, confirm the file exists.
-- Static file changes (HTML, JS, CSS) are picked up immediately by nginx — no restart needed, just refresh the browser.
-- CDN dependencies (Alpine.js, Tailwind Play CDN, marked, DOMPurify) require internet on first load. The service worker caches same-origin assets for offline use after the first visit.
-- All user data is stored in `localStorage` (no database). Clearing browser data resets the dashboard.
+- **Static file changes are instant** — no restart needed for HTML/JS/CSS/JSON edits. Just refresh the browser.
+- **Container restart only needed for**: `nginx-site.conf`, `docker-compose.yml`, or `api/server.js` changes.
+- **The API sidecar is optional** — the frontend never calls `/api/` endpoints in current code. It's diagnostic-only.
+- **CDN dependencies require internet** — Alpine.js, Tailwind Play CDN, marked, DOMPurify all load from CDN on first visit. Service worker caches same-origin assets for offline shell after first load.
+- **All user data is in localStorage** (`calvybots_*` keys). No database. Clearing browser data resets the dashboard.
+- **`nginx-site.local.conf`** has `root /usr/share/nginx/html` which the update script symlinks to `/workspace`. If nginx returns 403, verify: `ls -la /usr/share/nginx/html`.
+- **Port conflict**: if both Docker and local nginx try port 8033, stop one first. `sudo docker compose down` or `sudo nginx -s stop`.
+- **`/api/` must never be cached by the service worker** — this is a hard architectural rule.
+- **No `npm install` for the frontend** — only the `api/` service has a `package.json`, and it has zero runtime dependencies.
+
+### Skills
+
+Workflow skills are in `.cursor/skills/`:
+- `dev-environment.md` — starting/stopping/troubleshooting the dev environment
+- `widget-development.md` — widget creation and modification workflow
+- `deployment.md` — deployment to production
+- `qa-testing.md` — QA validation workflows and checklist locations
+- `git-workflow.md` — git conventions and branching
+
+### Rules
+
+Workspace rules are in `.cursor/rules/`:
+- `architecture.mdc` — static-first constraints, module loading, widget contract, localStorage schema
+- `visual-design.mdc` — cyan/dark palette tokens, component patterns, motion, accessibility
+- `widget-development.mdc` — per-instance isolation, Markdown safety, recurrence model, resize
+- `pwa-and-hosting.mdc` — service worker strategy, manifest rules, nginx config, security headers
+- `workflow-and-process.mdc` — team coordination, delegation format, QA output format
