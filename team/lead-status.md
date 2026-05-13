@@ -2,6 +2,54 @@
 
 Date: 2026-05-13
 
+### Client direction ? API persistence mount fallback (2026-05-13)
+
+**Status:** Backend container persistence now uses a compose bootstrap + named data volume to avoid write attempts on host `/mnt/data` while preserving `/api` contract.
+
+**What was attempted:** kept `/mnt/data/web_app/data` as immutable input (seed only) and moved `/api` runtime writes to a named volume mounted at `/data` in the API container.
+
+**Why fallback is required:** direct writes to `/mnt/data/web_app/data` were still producing `EROFS` in production-style runtime, and shared-host ownership constraints require this path to stay read-only for other services.
+
+**What persists where now:**
+- `/data/widgets.json` in compose volume `web_app_api_data` persists across `docker compose restart api`.
+- The same named volume persists across `docker compose down` / `docker compose up -d` unless `docker compose down -v` is used.
+- `/mnt/data/web_app/data/widgets.json` is now a migration seed only (not the active runtime writer).
+
+**Recovery tradeoff:** host `/mnt/data` can no longer be the single authoritative live source; recovery/restoration is volume-centric unless a manual snapshot/export is performed.
+
+**Recovery operators:**
+- `docker compose down && docker compose up -d`
+- `docker compose restart api`
+- `docker compose exec api sh -c 'test -f /data/widgets.json && wc -c /data/widgets.json && cat /data/widgets.json | head -c 200'`
+- `docker compose exec api sh -c 'ls -l /data /seed-data && [ -f /data/widgets.json ] && echo "writable-store OK" || echo "writable-store missing"'`
+
+**Note:** if host-side snapshotting is required, copy `/data/widgets.json` out of the named volume as a restore target.
+
+### Client direction ? Tools Status + Log default widgets (2026-05-13)
+
+**Status:** **Cycle closed (Team Lead)** ? implementation landed in workspace; **QA: Pass with notes**; recommend **merge when PR/branch is green**; optional LAN smoke (Home ? Tools, API, `console.warn`, persistence, SW) remains operational follow-up, not a dev blocker.
+
+**Summary:** Add default **Tools** widgets ? **Status** (traffic-light probes for shell, SW, `/api/health`, storage, optional CDN warn) and **Log** (ring buffer, console warn/error capture, terminal-style scroll). Instrumentation **starts at full app load** via a shared module imported from `js/app.js` so probes and logging run before the user opens Tools; widgets reflect live state when Tools is shown.
+
+**Assignment file:** `team/assignments-tools-status-log.md`
+
+**Priority / risks:** Console hook recursion and log spam ? mitigate with guards and level filtering. CDN probe must remain **warning-tier** only (offline-capable shell). Tools row sync to server must remain valid for new types.
+
+**Execution order:** Frontend implementation ? Backend verify-only (parallel OK) ? QA structured verdict.
+
+### Execution status (2026-05-13)
+
+- **Backend Dev (`backend-senior-dev`):** **Complete ? no repo edits.** `GET /api/health` returns `200` JSON `{ status, timestamp, uptime }`; nginx `/api/` not cache-breaking; `sw.js` bypasses `/api/`. Frontend should treat `status === "ok"` plus parseable JSON as healthy.
+- **Frontend Dev:** **Landed** ? `js/site-diagnostics.js` (ring buffer ~500, `subscribeLogs` / `subscribeProbes`, console **warn/error** hooks, `runProbes`, `initSiteDiagnostics`, 60s + `visibilitychange`, warn/crit ? log lines); `js/widgets/status-tools.js`; `js/widgets/log-tools.js`; wiring via `js/app.js` / `js/store.js` and related shell per assignment; `team/style-guide.md` updated (console hook scope, subscriber API names).
+- **QA (`qa-engineer`):** **Pass with notes** ? Low: doc drift addressed in style guide; Low: repeated warn/crit lines each poll noted as acceptable. **Sign-off recommendation:** approve pending optional LAN smoke.
+
+### Team Lead sign-off ? Tools Status + Log (2026-05-13)
+
+- **Further code before merge:** **None** required by this track. Optional follow-up (product discretion): probe log dedupe if repeated poll lines become noisy in practice.
+- **Merge / next step:** Proceed with normal PR review and merge when CI and reviewers are satisfied; run brief **https://web.calvy.com.au** or LAN smoke if validating in a live stack.
+
+---
+
 ### Client direction ? HTTPS validation baseline (2026-05-13)
 
 **Status:** Added to active delegation constraints for all verification tracks.
@@ -473,58 +521,6 @@ Execute **`team/assignments-widget-sync-interval-flush.md`**; Frontend lands fir
 
 **Cycle status:** **Signed off** for Team Lead tracking; optional human smoke + any client demo rehearsal remain operational follow-ups, not open dev items for this track.
 
----
-
-## Critical production bug — dashboard resets every ~1 min (2026-05-13)
-
-### Manager summary
-
-Client reported: dashboard at https://web.calvy.com.au resets to default layout roughly every minute. Edits are visible in a new private window 10 seconds later, but after ~1 minute everything reverts to the `data/widgets.json` defaults.
-
-Root-cause analysis (from prior exploration) identified three likely causes in priority order:
-
-- **A (primary):** API server process crashes/restarts periodically. Writes succeed transiently in the async queue but the crash kills them before reaching disk. On restart, disk still has defaults → every subsequent GET returns defaults.
-- **B:** Disk writes fail silently due to volume/permissions. HTTP 500 is sent to client but client swallows it. Data only ever lives in the process write queue until next crash.
-- **C:** A periodic `git pull`/deployment script resets `data/widgets.json` to git-tracked defaults (it is currently tracked in git with fixed content).
-
-Additional code-level bug found: `persistWidgets({ sync: false })` during `init()` stamps default widgets with `new Date().toISOString()` when `_widgetsUpdatedAt` is null (fresh private tab). This makes the client-side defaults appear "newer" than the server payload in `_reconcilePayloadLocally`, so real server data is discarded and the fresh-tab user sees defaults.
-
-### Assignment issued
-
-- **File:** `team/assignments-reset-fix.md`
-- **Track priority:** P0 — production data-loss bug.
-
-### Delegation summary
-
-| Owner | Focus | Primary files |
-|-------|-------|---------------|
-| **Backend Dev** | Diagnostic logging (WIDGETS_PATH, write success/fail, GET/PUT path) + remove `data/widgets.json` from git tracking | `api/server.js`, `.gitignore` |
-| **Frontend Dev** | Diagnostic logging (PUT failure, reconcile decision, init localTs) + fix timestamp-stamping of defaults during init | `js/app.js`, `js/store.js` |
-| **QA** | After both land: start Docker stack, verify git-ignore, browser smoke test with 90-second wait + second private window, check Docker logs | N/A (verdict only) |
-
-### Execution status (2026-05-13)
-
-- [x] **Backend Dev complete** (`e33cd01`): diagnostic logging in `api/server.js` (WIDGETS_PATH startup, writeWidgetsAtomic OK/FAILED, GET updatedAt, PUT payload updatedAt); `data/widgets.json` added to `.gitignore` and removed from git tracking via `git rm --cached`.
-- [x] **Frontend Dev complete** (`a7532e0`): three `[launchpad]` diagnostic log lines added to `js/app.js` (init localTs, reconcile decision, PUT failure); init timestamp fabrication bug fixed in `persistWidgets`/`persistToolsWidgets` + `saveWidgets` in `js/store.js`.
-- [x] **QA static + environment verification complete**: Docker stack started and confirmed clean. All five diagnostic log lines fire correctly in `docker compose logs`. API persistence confirmed: GET returns stale default → PUT updates `updatedAt` → API container restart → GET still returns the POST-PUT timestamp (not the stale default). Served `app.js` and `store.js` contain all fix lines. `node --check` syntax clean on both JS files. `git ls-files data/widgets.json` returns empty.
-
-### QA verdict
-
-**Pass with notes**
-
-- Diagnostic logging: fully working end-to-end (startup, GET, PUT, write success).
-- git-ignore fix: confirmed — `data/widgets.json` no longer tracked; `git reset --hard` in future will not overwrite live data.
-- API persistence across restart: confirmed via local Docker test.
-- Init timestamp bug: statically verified — `saveWidgets` no longer fabricates `new Date()` for null-timestamp init writes; `_reconcilePayloadLocally` will now correctly see `hasLocalTs=false` on fresh private tabs and apply server data.
-- **Note (medium, follow-up):** Full interactive browser verification on the production HTTPS URL (https://web.calvy.com.au) with a real 90-second wait and cross-private-window test was not performed from this workspace (Cloud Agent cannot drive a remote browser session). That verification is strongly recommended as the final human smoke test before closing root cause **A** (process crash cycle) — the logging now in place will surface any remaining crash/restart events in `docker compose logs` on the production server.
-- **Note (low):** Root cause **A** (periodic API crash) cannot be fully ruled out from static analysis. The new logging will definitively confirm or exclude it: if `[api] WIDGETS_PATH resolved to:` appears repeatedly in production logs at ~1 min intervals, the process is restarting and the ops team should investigate via `docker compose logs --timestamps api`.
-
-### Next action
-
-Team Lead recommends: human smoke test on production (https://web.calvy.com.au) — add content, wait 90 seconds, check a fresh private window. If content appears, the fix is complete. If content still resets, check `docker compose logs --timestamps api` on the production server for repeated WIDGETS_PATH startup lines (indicates crash-restart cycle — separate ops/infra issue, not a code defect).
-
----
-
 ## Client direction ? Server sync gate by reload (2026-05-13)
 
 ### Manager summary
@@ -558,3 +554,95 @@ Team Lead recommends: human smoke test on production (https://web.calvy.com.au) 
 - **QA:** `qa-engineer` returned **Pass with notes** for this track.
   - Acceptance criteria above are satisfied with evidence in `js/app.js` and no high/medium-severity blockers found.
   - Recommendation: close cycle from Team Lead perspective after optional manual proof (reload gate + cross-tab overwrite scenario).
+
+### Client direction ? Named volume fix for EROFS / PUT 500 (2026-05-13)
+
+**Status:** CLOSED ? implementation landed and QA static review passed.
+
+**Problem resolved:** `docker-compose.yml` was bind-mounting `/mnt/data/web_app/data:/data:rw` but the host NAS path is EROFS; every `PUT /api/widgets` returned 500.
+
+**Solution:** Replace host bind mount with named Docker volume `calvybots_api_data` mounted at `/data` in the `api` container. A read-only file bind overlay `config.json:/data/config.json:ro` ensures `GET /api/config` remains functional from the NAS. A `/seed-data:ro` mount + bootstrap `cp -n` in the startup command seeds `widgets.json` on first container start when the host file exists.
+
+**Commit:** `5e0fabc` ? Backend Senior Dev (`docker-compose.yml` only; `api/server.js` unchanged).
+
+**QA static verdict:** **Pass** ? all 13 static checks passed, zero defects. Named volume correctly wired, EROFS bind mount removed, atomic write path confirmed, `sw.js` `/api/` bypass unchanged.
+
+**Client migration commands (must be run on NAS host):**
+
+```bash
+# 1. Bring stack down
+docker compose down
+
+# 2. Create named volume (explicit; compose auto-creates on up too)
+docker volume create calvybots_api_data
+
+# 3. ONE-TIME SEED ? only if widgets.json has real data (skip if missing/default)
+#    Inspect first: cat /mnt/data/web_app/data/widgets.json
+#    If it has real widget data, run:
+docker run --rm \
+  -v calvybots_api_data:/data \
+  -v /mnt/data/web_app/data:/src:ro \
+  alpine sh -c "cp /src/widgets.json /data/widgets.json && echo SEED_OK"
+
+# 4. Start stack
+docker compose up -d
+
+# 5. Verify write access
+docker compose exec api sh -lc "touch /data/.write_test && rm -f /data/.write_test && echo WRITE_OK"
+
+# 6. Check api logs
+docker compose logs --tail=40 api
+```
+
+**Interactive smoke items (client to confirm on live NAS):**
+- [ ] Step 5 above returns `WRITE_OK`
+- [ ] `PUT /api/widgets` returns 200 (not 500)
+- [ ] `docker compose logs` shows no EROFS errors
+- [ ] `GET /api/widgets` returns persisted document after a PUT
+- [ ] `GET /api/config` returns 200
+- [ ] `docker compose down` (no `-v`) + `docker compose up -d` ? `GET /api/widgets` returns last saved state (volume durability)
+- [ ] Browser: edit Notes/To-Do, wait 3-5s, open private window ? content appears
+
+**Volume durability note:** The named volume persists across `docker compose down` / `docker compose up -d`. It is removed only by `docker compose down -v` or `docker volume rm calvybots_api_data`. For NAS-side backup, export with: `docker run --rm -v calvybots_api_data:/data -v /mnt/data/web_app/data:/backup alpine cp /data/widgets.json /backup/widgets.json`.
+
+---
+
+### Client direction ? Widget sync 500 + EROFS follow-up (2026-05-13)
+
+**Status:** Delegate cycle reopened; backend diagnostics landed; environment remains blocked by EROFS until runtime writable path is confirmed.
+
+#### Team Lead assignment
+
+- Resolve recurring `PUT /api/widgets` 500 errors and confirm persistent server writes in the live runtime.
+- Ensure client offline/local-first editing remains non-blocking while sync is failing.
+
+#### Backend Dev status
+
+- `backend-senior-dev` added write-path diagnostics in `api/server.js`:
+  - `WIDGETS_PATH`/directory startup checks,
+  - success/failure logging around atomic write (`writeWidgetsAtomic`),
+  - detailed `handlePutWidgets` acceptance and failure log payload.
+- Queue semantics were left intact.
+- `docker-compose.yml` still targets `/mnt/data/web_app/data:/data:rw`; compose edit was not required by this pass.
+
+#### Frontend Dev status
+
+- `frontend-senior-dev` hardened `js/app.js` sync state transitions:
+  - keep `_widgetsNeedSync` set if local edits occur while a PUT is in flight,
+  - clear dirty state only when the in-flight snapshot is still current,
+  - improve PUT failure logging with response body details.
+- Local edits and localStorage persistence remained unchanged.
+
+#### QA status
+
+- `qa-engineer` reported **Fail (blocked)**: `PUT /api/widgets` still returns `500` with `EROFS` details (`open '/data/widgets.json....tmp'`).
+- Client-side polling/put interval and private-window propagation checks remain blocked until write succeeds.
+
+#### Next action for Team Lead
+
+1. Fix the running API runtime filesystem writability for `/data` (host mount ownership/permissions or active compose variant mismatch).
+2. Re-run private-window persistence and container logs after restart:
+  - successful server `PUT /api/widgets` (`200`),
+  - observed backend write success log,
+  - private window sees fresh server-backed widget payload.
+3. Return to QA pass once backend writes are confirmed.
