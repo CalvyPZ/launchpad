@@ -105,6 +105,34 @@ Per **`team/assignments-qa-remediation-v1.md`** (Definition of done and ordered 
 - **Scope delivered by Frontend Dev:** `css/style.css`, `js/widgets/todo.js`.
 - **Acceptance check passed:** larger mobile touch targets for done/remove (`.todo-task-done-toggle`, `.todo-item-handle`, `.todo-task-remove`), full-text tap toggle in display mode, strike-through styling for completed tasks, and compact edit-mode done toggle.
 
+### Client direction — Pointer-Events DnD replacement (2026-05-13)
+
+**Status:** Delegated to Frontend Dev.
+
+**Scope:** Replace both HTML5 Drag-and-Drop layers (dashboard widget reorder in `js/app.js` and todo task reorder in `js/widgets/todo.js`) with a Pointer Events API implementation that works on touch and mouse. No libraries. Vanilla JS only.
+
+**Key requirements:**
+- Press/hold on handle raises the dragged element (scale + shadow + slight opacity ghost).
+- Ghost clone (fixed-positioned DOM clone on `body`) follows the pointer in real time using `transform: translate()`.
+- `setPointerCapture` on the handle element to avoid losing the pointer.
+- Live insertion preview across all todo widgets (`.dnd-task-placeholder` with cyan accent).
+- Invalid drop → ghost animates back, no data mutation.
+- `touch-action: none` on `.widget-handle` and `.todo-item-handle`.
+- Cyan accent `#2dd4bf` for ghost border and placeholder.
+
+**Assignment file:** `team/assignments-dnd-pointer.md`
+
+**Subagent execution (2026-05-13):**
+1. Team Lead authored `team/assignments-dnd-pointer.md` and updated `team/lead-status.md`.
+2. Frontend Dev implemented Pointer Events replacement in `js/app.js`, `js/widgets/todo.js`, `css/style.css`, and `team/style-guide.md`.
+3. QA static review: **Pass with notes** — two medium findings (missing ghost scale transforms on `.dnd-ghost-widget` and `.dnd-ghost-task`).
+4. Frontend Dev remediated both CSS findings (added `transform: scale(1.04)` / `scale(1.03)`).
+5. QA re-verify: **Pass** — all acceptance bullets resolved, no remaining static blockers.
+
+**Status:** Implementation and static QA are complete. Interactive verification (real touch device, cross-widget rapid moves, snap-back) recommended before client demo.
+
+---
+
 ### Client direction — commits & style guide (2026-05-13)
 
 - **Commits:** Include **all** files that are part of the same deliverable (including `team/` updates), not a subset of product files only.

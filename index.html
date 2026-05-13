@@ -23,7 +23,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
 
@@ -44,7 +44,7 @@
                 "text-3": "#5c5c5c",
               },
               fontFamily: {
-                sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+                sans: ["Outfit", "ui-sans-serif", "system-ui", "sans-serif"],
               },
               borderRadius: {
                 card: "10px",
@@ -90,6 +90,8 @@
               <h1
                 class="text-2xl sm:text-3xl font-semibold leading-tight tracking-tight text-text-1 cursor-text outline-none min-w-0"
                 contenteditable="true"
+                role="textbox"
+                aria-label="Dashboard title"
                 x-text="siteTitle"
                 @blur="setSiteTitle($event.target.textContent)"
                 spellcheck="false"
@@ -125,6 +127,7 @@
                   @click="addWidgetOpen = !addWidgetOpen"
                   aria-haspopup="listbox"
                   :aria-expanded="addWidgetOpen"
+                  aria-label="Add widget"
                 >
                   <span aria-hidden="true">＋</span>
                   Add Widget
@@ -172,7 +175,7 @@
 
       <!-- Widget grid -->
       <main class="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
-        <section id="widget-grid" class="widget-grid">
+        <section id="widget-grid" x-ref="widgetGrid" class="widget-grid">
           <!-- Widgets injected by app.js -->
         </section>
       </main>

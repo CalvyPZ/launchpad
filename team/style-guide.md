@@ -17,6 +17,13 @@
 - `text-1` (`#f0f0f0`) — primary text
 - `text-2` (`#9a9a9a`) — secondary text
 - `text-3` (`#5c5c5c`) — muted metadata
+- `accent-active` (`#2dd4bf`) — all active/focus/hover links and controls
+
+### Recent UI/token updates
+
+- Purple/violet highlight tokens are no longer used for active UI states in touched surfaces; controls and focus affordances use `#2dd4bf`.
+- Font stack remains default dark theme family and now explicitly aligns with the `Outfit` import and Tailwind `fontFamily.sans`.
+- Notes and To-Do shells continue to rely on existing widget contracts (`render(container, widgetRow, dashboard)`) and do not render widget titles.
 
 ## Typography scale
 
@@ -102,13 +109,13 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 
 - Shows recurrence block (`never` / `daily` / `weekly`), local time, weekday when weekly.
 - “New task” row always available.
-- Task row: compact **done** toggle (✓ / ◯, touch-safe) + text input; left **colour bar** opens fixed-position 3×3 palette; **drag handle** (`≡`) for reorder; **remove** (`×`); HTML5 DnD within the list and **cross-list** moves onto another To-Do widget’s list.
+- Task row: compact **done** toggle (✓ / ◯, touch-safe) + text input; left **colour bar** opens fixed-position 3×3 palette; **drag handle** (`≡`) for reorder; **remove** (`×`); Pointer-events drag for within-list and **cross-list** moves onto another To-Do widget’s list.
 
 ### Display mode
 
 - No recurrence UI; “New task” row still shown.
 - **No checkbox:** done state is toggled by tapping the **full-width task label button** (`todo-task-text-toggle`); completed tasks use **strikethrough** + muted text.
-- Same colour bar, drag handle, remove, DnD, and cross-list behaviour as edit mode.
+- Same colour bar, drag handle, remove, Pointer-events drag, and cross-list behaviour as edit mode.
 - Colour picker panel is **`position: fixed`** (viewport-clamped) so it is not clipped by the widget or scroll container.
 
 ### Interaction & accessibility
@@ -116,3 +123,12 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 - Primary accent remains **cyan** (`#2dd4bf`) for focus rings and shell actions; task border colours may use the full palette above.
 - Touch: prefer **~44px** minimum hit areas on drag handle, remove, edit-mode done toggle, and text-toggle row (see `.todo-item-handle`, `.todo-task-remove`, `.todo-task-done-toggle`, `.todo-task-text-toggle`).
 - Icon-only controls need explicit `aria-label` / `aria-pressed` where stateful (`aria-pressed` on done toggles).
+
+### Pointer-events drag-and-drop pattern (v4)
+
+- Drag uses Pointer Events only (`pointerdown`, `pointermove`, `pointerup`, `pointercancel`, `lostpointercapture`) for both widget and task reordering.
+- Widget reordering attaches pointer handling to `.widget-handle`; a fixed-position clone adopts `.dnd-ghost-widget` and follows `event.clientX/Y` using `transform: translate(...)`.
+- Task reordering attaches pointer handling to `.todo-item-handle`; a fixed-position clone adopts `.dnd-ghost-task`.
+- While dragging tasks, all `.todo-list` elements participate as drop targets; insertion is driven by midpoint logic and visualized with `.dnd-task-placeholder` and `.is-list-drop-target`.
+- Pointer drag over state is reflected with `.dnd-over` and body suppression is handled via `body.dnd-active` (`user-select: none`).
+- Mobile/touch interaction requires `touch-action: none` on `.widget-handle` and `.todo-item-handle` to prevent scroll capture during drag.

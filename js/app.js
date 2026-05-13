@@ -18,10 +18,11 @@ const widgetFactories = {
   notes: notesWidget.render,
   todo: todoWidget.render,
 };
+const widgetTypeSet = new Set(widgetTypes);
 
 const widgetLabels = {
   clock: "Clock",
-  notes: "Notes",
+  notes: "Sticky Notes",
   todo: "To-Do",
 };
 
@@ -52,10 +53,18 @@ document.addEventListener("alpine:init", () => {
   Alpine.data("launchpad", function launchpad() {
   const controllers = new Map();
   const resizeObservers = new Map();
-  const widgetMap = document.getElementById("widget-grid");
-  let dragFromId = null;
-  let clockTimer = null;
-
+    const widgetDragState = {
+      active: false,
+      pointerId: null,
+      sourceWidgetId: null,
+      sourceWidget: null,
+      sourceRect: null,
+      pointerOffsetX: 0,
+      pointerOffsetY: 0,
+      ghost: null,
+      dropTargetWidgetId: null,
+      dropIndex: null,
+    };
   const format = nowClockText();
 
   return {
@@ -67,18 +76,30 @@ document.addEventListener("alpine:init", () => {
     widgets: [],
     clockTitle: "",
     online: typeof navigator !== "undefined" ? navigator.onLine : true,
+    widgetMapEl: null,
     _todoResetTicker: null,
+    _clockTicker: null,
+    _onlineHandler: null,
+    _offlineHandler: null,
+    _visibilityHandler: null,
+
+    getWidgetMap() {
+      return this.widgetMapEl || document.getElementById("widget-grid");
+    },
 
     init() {
-      window.addEventListener("online", () => {
+      this.widgetMapEl = this.$refs?.widgetGrid || document.getElementById("widget-grid");
+      this._onlineHandler = () => {
         this.online = true;
-      });
-      window.addEventListener("offline", () => {
+      };
+      this._offlineHandler = () => {
         this.online = false;
-      });
+      };
+      window.addEventListener("online", this._onlineHandler);
+      window.addEventListener("offline", this._offlineHandler);
       this.refreshClock();
       this.widgets = loadWidgets();
-      this.handleVisibility = () => {
+      this._visibilityHandler = () => {
         if (document.visibilityState === "visible") {
           if (evaluateAllTodoResets(this.widgets)) {
             this.persistWidgets();
@@ -89,11 +110,11 @@ document.addEventListener("alpine:init", () => {
           this._disarmTodoResetTicker();
         }
       };
-      document.addEventListener("visibilitychange", this.handleVisibility);
+      document.addEventListener("visibilitychange", this._visibilityHandler);
       this.renderWidgets();
       this.persistWidgets();
-      if (clockTimer) window.clearInterval(clockTimer);
-      clockTimer = window.setInterval(() => this.refreshClock(), 1000);
+      if (this._clockTicker) window.clearInterval(this._clockTicker);
+      this._clockTicker = window.setInterval(() => this.refreshClock(), 1000);
       if (document.visibilityState === "visible") {
         this._armTodoResetTicker();
       }
@@ -143,6 +164,7 @@ document.addEventListener("alpine:init", () => {
     },
 
     renderWidgets() {
+      const widgetMap = this.getWidgetMap();
       if (!widgetMap) return;
       this.normalizeWidgets();
       widgetMap.classList.add("widget-enter");
@@ -162,7 +184,6 @@ document.addEventListener("alpine:init", () => {
         shell.className = `dash-widget ${this.editMode ? "editable" : ""}`;
         shell.dataset.widgetId = config.id;
         shell.dataset.widgetType = config.type;
-        shell.draggable = this.editMode;
 
         const minW = Number.isFinite(config.minWidth) ? config.minWidth : 250;
         const minH = Number.isFinite(config.minHeight) ? config.minHeight : 178;
@@ -230,10 +251,11 @@ document.addEventListener("alpine:init", () => {
         shell.appendChild(dragHandle);
 
         if (this.editMode) {
-          shell.addEventListener("dragstart", this.onDragStart.bind(this, config.id));
-          shell.addEventListener("dragover", this.onDragOver.bind(this));
-          shell.addEventListener("drop", this.onDrop.bind(this, config.id));
-          shell.addEventListener("dragend", this.onDragEnd.bind(this));
+          dragHandle.addEventListener("pointerdown", this.onWidgetPointerDown.bind(this));
+          dragHandle.addEventListener("pointermove", this.onWidgetPointerMove.bind(this));
+          dragHandle.addEventListener("pointerup", this.onWidgetPointerUp.bind(this));
+          dragHandle.addEventListener("pointercancel", this.onWidgetPointerCancel.bind(this));
+          dragHandle.addEventListener("lostpointercapture", this.onWidgetLostPointerCapture.bind(this));
         }
 
         const widgetRenderer = widgetFactories[config.type];
@@ -277,38 +299,197 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
-    onDragStart(id, event) {
-      dragFromId = id;
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", id);
-      event.currentTarget.classList.add("opacity-70");
-    },
+    onWidgetPointerDown(event) {
+      const widgetMap = this.getWidgetMap();
+      if (!this.editMode || !widgetMap) return;
+      if (!event?.currentTarget || !event.target) return;
+      const handle = event.currentTarget;
+      const shell = handle.closest(".dash-widget");
+      if (!(shell instanceof HTMLElement)) return;
+      const sourceWidgetId = shell.dataset.widgetId;
+      if (!sourceWidgetId) return;
+      if (typeof handle.setPointerCapture === "function") {
+        handle.setPointerCapture(event.pointerId);
+      }
 
-    onDragOver(event) {
-      if (!this.editMode) return;
+      const rect = shell.getBoundingClientRect();
+      const ghost = shell.cloneNode(true);
+      ghost.classList.add("dnd-ghost-widget");
+      ghost.style.position = "fixed";
+      ghost.style.left = `${rect.left}px`;
+      ghost.style.top = `${rect.top}px`;
+      ghost.style.width = `${rect.width}px`;
+      ghost.style.height = `${rect.height}px`;
+      ghost.style.transform = "translate(0px, 0px)";
+      ghost.style.pointerEvents = "none";
+      ghost.style.zIndex = "9000";
+      ghost.style.margin = "0";
+      ghost.style.transformOrigin = "center";
+      ghost.setAttribute("aria-hidden", "true");
+      document.body.appendChild(ghost);
+
+      widgetDragState.active = true;
+      widgetDragState.pointerId = event.pointerId;
+      widgetDragState.sourceWidgetId = sourceWidgetId;
+      widgetDragState.sourceWidget = shell;
+      widgetDragState.sourceRect = rect;
+      widgetDragState.pointerOffsetX = event.clientX - rect.left;
+      widgetDragState.pointerOffsetY = event.clientY - rect.top;
+      widgetDragState.ghost = ghost;
+      widgetDragState.dropTargetWidgetId = null;
+      widgetDragState.dropIndex = null;
+      document.body.classList.add("dnd-active");
       event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
     },
 
-    onDrop(targetId, event) {
-      event.preventDefault();
-      if (!this.editMode) return;
-      const fromId = event.dataTransfer.getData("text/plain") || dragFromId;
-      if (!fromId || fromId === targetId) return;
-      const nextOrder = this.widgets.slice();
-      const fromIndex = nextOrder.findIndex((widget) => widget.id === fromId);
-      const targetIndex = nextOrder.findIndex((widget) => widget.id === targetId);
-      if (fromIndex < 0 || targetIndex < 0) return;
-      const [moved] = nextOrder.splice(fromIndex, 1);
-      nextOrder.splice(targetIndex, 0, moved);
-      this.widgets = nextOrder;
-      this.persistWidgets();
-      this.renderWidgets();
+    onWidgetPointerMove(event) {
+      const widgetMap = this.getWidgetMap();
+      if (!widgetMap) return;
+      if (!widgetDragState.active || event.pointerId !== widgetDragState.pointerId || !widgetDragState.ghost) return;
+      if (event.pointerType === "touch") {
+        event.preventDefault();
+      }
+
+      const rect = widgetDragState.sourceRect;
+      if (!rect) return;
+
+      const dx = event.clientX - widgetDragState.pointerOffsetX - rect.left;
+      const dy = event.clientY - widgetDragState.pointerOffsetY - rect.top;
+      widgetDragState.ghost.style.transform = `translate(${dx}px, ${dy}px)`;
+
+      const pointerX = event.clientX;
+      const pointerY = event.clientY;
+      let target = null;
+      let dropIndex = null;
+      let targetBefore = true;
+      const widgets = Array.from(widgetMap.querySelectorAll(".dash-widget"));
+
+      for (const widget of widgets) {
+        if (widget === widgetDragState.sourceWidget) continue;
+        const bounds = widget.getBoundingClientRect();
+        if (
+          pointerX >= bounds.left &&
+          pointerX <= bounds.right &&
+          pointerY >= bounds.top &&
+          pointerY <= bounds.bottom
+        ) {
+          target = widget;
+          const targetRect = bounds;
+          const midpoint = targetRect.top + targetRect.height / 2;
+          targetBefore = pointerY < midpoint;
+          const targetIndex = widgets.indexOf(widget);
+          dropIndex = targetBefore ? targetIndex : targetIndex + 1;
+          break;
+        }
+      }
+
+      for (const widget of widgets) {
+        widget.classList.toggle("dnd-over", widget === target);
+      }
+
+      widgetDragState.dropTargetWidgetId = target?.dataset.widgetId || null;
+      widgetDragState.dropIndex = dropIndex;
     },
 
-    onDragEnd(event) {
-      event.currentTarget.classList.remove("opacity-70");
-      dragFromId = null;
+    onWidgetPointerUp(event) {
+      if (!widgetDragState.active || event.pointerId !== widgetDragState.pointerId) return;
+
+      const sourceWidgetId = widgetDragState.sourceWidgetId;
+      const targetWidgetId = widgetDragState.dropTargetWidgetId;
+      const requestedIndex = widgetDragState.dropIndex;
+
+      let committed = false;
+      if (targetWidgetId && sourceWidgetId && sourceWidgetId !== targetWidgetId && Number.isFinite(requestedIndex)) {
+        const nextOrder = this.widgets.slice();
+        const fromIndex = nextOrder.findIndex((widget) => widget.id === sourceWidgetId);
+        const targetBaseIndex = requestedIndex > nextOrder.length ? nextOrder.length : requestedIndex;
+        if (fromIndex >= 0) {
+          const [moved] = nextOrder.splice(fromIndex, 1);
+          let insertAt = targetBaseIndex;
+          if (fromIndex < insertAt) {
+            insertAt -= 1;
+          }
+          if (insertAt < 0) insertAt = 0;
+          if (insertAt > nextOrder.length) insertAt = nextOrder.length;
+          nextOrder.splice(insertAt, 0, moved);
+          if (JSON.stringify(nextOrder) !== JSON.stringify(this.widgets)) {
+            this.widgets = nextOrder;
+            this.persistWidgets();
+            this.renderWidgets();
+            committed = true;
+          }
+        }
+      }
+
+      this.onWidgetDragEnd(committed, !committed);
+      if (widgetDragState.sourceWidget && widgetDragState.sourceWidget instanceof Element) {
+        widgetDragState.sourceWidget.focus();
+      }
+      if (committed) {
+        event.preventDefault();
+      }
+    },
+
+    onWidgetPointerCancel() {
+      this.onWidgetDragEnd(false, true);
+    },
+
+    onWidgetLostPointerCapture() {
+      if (!widgetDragState.active) return;
+      this.onWidgetDragEnd(false, true);
+    },
+
+    onWidgetDragEnd(committed = false, shouldSnapBack = false) {
+      const widgetMap = this.getWidgetMap();
+      const ghost = widgetDragState.ghost;
+      if (!ghost) {
+        widgetDragState.active = false;
+        widgetDragState.pointerId = null;
+        widgetDragState.sourceWidgetId = null;
+        widgetDragState.sourceWidget = null;
+        widgetDragState.sourceRect = null;
+        widgetDragState.pointerOffsetX = 0;
+        widgetDragState.pointerOffsetY = 0;
+        widgetDragState.dropTargetWidgetId = null;
+        widgetDragState.dropIndex = null;
+        document.body.classList.remove("dnd-active");
+        if (widgetMap) {
+          Array.from(widgetMap.querySelectorAll(".dash-widget")).forEach((widget) => widget.classList.remove("dnd-over"));
+        }
+        return;
+      }
+
+      const cleanupGhost = () => {
+        if (ghost.isConnected) ghost.remove();
+      };
+
+      if (shouldSnapBack && !committed) {
+        const onSnapEnd = () => {
+          ghost.removeEventListener("transitionend", onSnapEnd);
+          cleanupGhost();
+        };
+        ghost.style.transition = "transform 220ms ease-out";
+        ghost.style.transform = "translate(0px, 0px)";
+        ghost.addEventListener("transitionend", onSnapEnd);
+        setTimeout(onSnapEnd, 250);
+      } else {
+        cleanupGhost();
+      }
+
+      widgetDragState.active = false;
+      widgetDragState.pointerId = null;
+      widgetDragState.sourceWidgetId = null;
+      widgetDragState.sourceWidget = null;
+      widgetDragState.sourceRect = null;
+      widgetDragState.pointerOffsetX = 0;
+      widgetDragState.pointerOffsetY = 0;
+      widgetDragState.ghost = null;
+      widgetDragState.dropTargetWidgetId = null;
+      widgetDragState.dropIndex = null;
+      document.body.classList.remove("dnd-active");
+      if (widgetMap) {
+        Array.from(widgetMap.querySelectorAll(".dash-widget")).forEach((widget) => widget.classList.remove("dnd-over"));
+      }
     },
 
     toggleEditMode() {
@@ -319,8 +500,7 @@ document.addEventListener("alpine:init", () => {
 
     addWidget(type) {
       if (!this.editMode) return;
-      const validTypes = ["clock", "notes", "todo"];
-      if (!validTypes.includes(type)) return;
+      if (!widgetTypeSet.has(type)) return;
       const nextPosition = this.widgets.length;
       const next = {
         id: makeWidgetId(type),
@@ -346,6 +526,23 @@ document.addEventListener("alpine:init", () => {
       this.widgets = this.widgets.filter((item) => item.id !== widgetId);
       this.persistWidgets();
       this.renderWidgets();
+    },
+
+    destroy() {
+      if (this._clockTicker) {
+        window.clearInterval(this._clockTicker);
+        this._clockTicker = null;
+      }
+      this._disarmTodoResetTicker();
+      if (this._onlineHandler) {
+        window.removeEventListener("online", this._onlineHandler);
+      }
+      if (this._offlineHandler) {
+        window.removeEventListener("offline", this._offlineHandler);
+      }
+      if (this._visibilityHandler) {
+        document.removeEventListener("visibilitychange", this._visibilityHandler);
+      }
     },
   };
   });

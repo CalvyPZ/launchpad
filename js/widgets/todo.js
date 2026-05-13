@@ -95,10 +95,23 @@ export function render(container, context) {
   evaluateTodoPeriodicReset(config.todoState);
 
   let items = [...state.tasks];
-  let draggedTaskId = null;
-  let draggedSourceWidgetId = null;
   let activeColorTaskId = null;
   let listEl = null;
+  const taskDragState = {
+    active: false,
+    pointerId: null,
+    sourceWidgetId: null,
+    sourceTaskId: null,
+    sourceTaskEl: null,
+    sourceList: null,
+    ghost: null,
+    placeholder: null,
+    destinationList: null,
+    destinationTaskId: null,
+    pointerOffsetX: 0,
+    pointerOffsetY: 0,
+    sourceRect: null,
+  };
 
   container.className = "h-full todo-widget-root";
   container.innerHTML = `
@@ -193,41 +206,29 @@ export function render(container, context) {
     weekdayWrap.style.display = recurrenceSelect.value === "weekly" ? "" : "none";
   };
 
-  const parsePayload = (event) => {
-    if (!event?.dataTransfer) return null;
-    const json = event.dataTransfer.getData("application/json");
-    if (json) {
-      try {
-        const parsed = JSON.parse(json);
-        if (parsed?.taskId && parsed?.sourceWidgetId) {
-          return {
-            sourceWidgetId: String(parsed.sourceWidgetId),
-            taskId: String(parsed.taskId),
-          };
-        }
-      } catch {}
-    }
-    const plain = event.dataTransfer.getData("text/plain") || "";
-    const divider = plain.indexOf(":");
-    if (divider > 0) {
-      return {
-        sourceWidgetId: plain.slice(0, divider),
-        taskId: plain.slice(divider + 1),
-      };
-    }
-    if (draggedTaskId && draggedSourceWidgetId) {
-      return {
-        sourceWidgetId: draggedSourceWidgetId,
-        taskId: draggedTaskId,
-      };
-    }
-    return null;
+  const makeTaskPayload = (sourceWidgetId, taskId) => {
+    if (!sourceWidgetId || !taskId) return null;
+    return {
+      sourceWidgetId: String(sourceWidgetId),
+      taskId: String(taskId),
+    };
   };
 
-  const clearDropState = () => {
-    if (!listEl) return;
-    listEl.classList.remove("is-list-drop-target");
-    listEl.querySelectorAll(".todo-item").forEach((item) => item.classList.remove("is-drop-target"));
+  const getTodoLists = () => Array.from(document.querySelectorAll(".todo-list"));
+
+  const removeTaskPlaceholder = () => {
+    if (!taskDragState.placeholder) return;
+    if (taskDragState.placeholder.parentElement) {
+      taskDragState.placeholder.remove();
+    }
+  };
+
+  const clearTodoDragState = () => {
+    getTodoLists().forEach((todoList) => {
+      todoList.classList.remove("is-list-drop-target");
+      todoList.querySelectorAll(".todo-item").forEach((item) => item.classList.remove("dnd-over"));
+    });
+    removeTaskPlaceholder();
   };
 
   const moveTask = (payload, destinationWidgetId, destinationTaskId = null) => {
@@ -365,78 +366,160 @@ export function render(container, context) {
     activeColorTaskId = taskId;
   };
 
-  const onTaskDragStart = (event) => {
-    const item = event.currentTarget;
-    const handle = event.target;
-    if (!handle?.closest?.(".todo-item-handle")) {
-      event.preventDefault();
+  const ensureTaskPlaceholder = () => {
+    if (taskDragState.placeholder) return taskDragState.placeholder;
+    const placeholder = document.createElement("div");
+    placeholder.className = "dnd-task-placeholder";
+    taskDragState.placeholder = placeholder;
+    return placeholder;
+  };
+
+  const getInsertionTargetTask = (list, pointerY) => {
+    const tasks = Array.from(list.querySelectorAll(".todo-item")).filter((task) => task !== taskDragState.sourceTaskEl);
+    if (!tasks.length) return null;
+    for (const task of tasks) {
+      const rect = task.getBoundingClientRect();
+      const midpoint = rect.top + rect.height / 2;
+      if (pointerY < midpoint) {
+        return task.dataset.taskId || null;
+      }
+    }
+    return null;
+  };
+
+  const placePlaceholder = (list, destinationTaskId) => {
+    const placeholder = ensureTaskPlaceholder();
+    if (!list) return;
+    if (!destinationTaskId) {
+      if (placeholder.parentElement !== list) {
+        list.appendChild(placeholder);
+      } else if (placeholder.nextSibling) {
+        list.appendChild(placeholder);
+      }
       return;
     }
-    const taskId = item?.dataset?.taskId;
-    if (!taskId) return;
-    draggedTaskId = taskId;
-    draggedSourceWidgetId = currentWidgetId;
-    item.classList.add("is-dragging");
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("application/json", JSON.stringify({ taskId, sourceWidgetId: currentWidgetId }));
-    event.dataTransfer.setData("text/plain", `${currentWidgetId}:${taskId}`);
-  };
-
-  const onTaskDragOver = (event) => {
-    event.preventDefault();
-    const item = event.currentTarget;
-    if (item) item.classList.add("is-drop-target");
-    if (listEl) listEl.classList.add("is-list-drop-target");
-  };
-
-  const onTaskDragLeave = (event) => {
-    const item = event.currentTarget;
-    if (item) item.classList.remove("is-drop-target");
-  };
-
-  const onTaskDrop = (event) => {
-    event.preventDefault();
-    const destinationTaskId = event.currentTarget?.dataset?.taskId || null;
-    const destinationWidgetId = listEl?.dataset.widgetId;
-    const payload = parsePayload(event);
-    clearDropState();
-    if (!destinationWidgetId || !payload) return;
-    if (payload.sourceWidgetId === destinationWidgetId && payload.taskId === destinationTaskId) return;
-    const targetTaskId = destinationWidgetId === payload.sourceWidgetId ? destinationTaskId : null;
-    moveTask(payload, destinationWidgetId, targetTaskId);
-  };
-
-  const onTaskDragEnd = (event) => {
-    const item = event.currentTarget;
-    if (item) item.classList.remove("is-dragging");
-    clearDropState();
-    draggedTaskId = null;
-    draggedSourceWidgetId = null;
-  };
-
-  const onListDragOver = (event) => {
-    event.preventDefault();
-    if (listEl) {
-      listEl.classList.add("is-list-drop-target");
-      event.dataTransfer.dropEffect = "move";
+    const target = list.querySelector(`.todo-item[data-task-id="${escapeHtml(destinationTaskId)}"]`);
+    if (target && target.parentElement === list) {
+      list.insertBefore(placeholder, target);
     }
   };
 
-  const onListDragLeave = (event) => {
-    if (!listEl) return;
-    const related = event.relatedTarget;
-    if (!(related instanceof Element) || !listEl.contains(related)) {
-      listEl.classList.remove("is-list-drop-target");
+  const onTaskPointerDown = (event) => {
+    const handle = event.currentTarget;
+    const taskElement = handle.closest(".todo-item");
+    const taskId = taskElement?.dataset?.taskId;
+    if (!taskElement || !taskId) return;
+    if (typeof handle.setPointerCapture === "function") {
+      handle.setPointerCapture(event.pointerId);
     }
+    const sourceList = taskElement.closest(".todo-list");
+    const rect = taskElement.getBoundingClientRect();
+    const ghost = taskElement.cloneNode(true);
+    ghost.className = `${taskElement.className} dnd-ghost-task`;
+    ghost.style.width = `${rect.width}px`;
+    ghost.style.left = `${rect.left}px`;
+    ghost.style.top = `${rect.top}px`;
+    ghost.style.position = "fixed";
+    ghost.style.pointerEvents = "none";
+    ghost.style.zIndex = "9000";
+    ghost.style.transform = "translate(0px, 0px)";
+    document.body.appendChild(ghost);
+
+    taskDragState.active = true;
+    taskDragState.pointerId = event.pointerId;
+    taskDragState.sourceWidgetId = currentWidgetId;
+    taskDragState.sourceTaskId = taskId;
+    taskDragState.sourceTaskEl = taskElement;
+    taskDragState.sourceList = sourceList;
+    taskDragState.ghost = ghost;
+    taskDragState.destinationList = null;
+    taskDragState.destinationTaskId = null;
+    taskDragState.pointerOffsetX = event.clientX - rect.left;
+    taskDragState.pointerOffsetY = event.clientY - rect.top;
+    taskDragState.sourceRect = rect;
+    document.body.classList.add("dnd-active");
+    event.preventDefault();
   };
 
-  const onListDrop = (event) => {
-    event.preventDefault();
-    const destinationWidgetId = listEl?.dataset.widgetId;
-    const payload = parsePayload(event);
-    clearDropState();
-    if (!destinationWidgetId || !payload) return;
-    moveTask(payload, destinationWidgetId, null);
+  const onTaskPointerMove = (event) => {
+    if (!taskDragState.active || event.pointerId !== taskDragState.pointerId || !taskDragState.ghost || !taskDragState.sourceRect) return;
+    if (event.pointerType === "touch") {
+      event.preventDefault();
+    }
+    const rect = taskDragState.sourceRect;
+    const dx = event.clientX - taskDragState.pointerOffsetX - rect.left;
+    const dy = event.clientY - taskDragState.pointerOffsetY - rect.top;
+    taskDragState.ghost.style.transform = `translate(${dx}px, ${dy}px)`;
+
+    const pointerX = event.clientX;
+    const pointerY = event.clientY;
+    let destinationList = null;
+    let destinationTaskId = null;
+
+    const todoLists = getTodoLists();
+    for (const list of todoLists) {
+      const bounds = list.getBoundingClientRect();
+      if (
+        pointerX >= bounds.left &&
+        pointerX <= bounds.right &&
+        pointerY >= bounds.top &&
+        pointerY <= bounds.bottom
+      ) {
+        destinationList = list;
+        break;
+      }
+    }
+
+    clearTodoDragState();
+
+    if (!destinationList) return;
+    destinationTaskId = getInsertionTargetTask(destinationList, pointerY);
+    destinationList.classList.add("is-list-drop-target");
+    placePlaceholder(destinationList, destinationTaskId);
+    taskDragState.destinationList = destinationList;
+    taskDragState.destinationTaskId = destinationTaskId;
+  };
+
+  const onTaskPointerUp = (event) => {
+    if (!taskDragState.active || event.pointerId !== taskDragState.pointerId) return;
+    const payload = makeTaskPayload(taskDragState.sourceWidgetId, taskDragState.sourceTaskId);
+    const destinationWidgetId = taskDragState.destinationList?.dataset?.widgetId;
+    const destinationTaskId = taskDragState.destinationTaskId || null;
+    const shouldCommit = Boolean(payload && destinationWidgetId);
+    if (shouldCommit) {
+      moveTask(payload, destinationWidgetId, destinationTaskId);
+    }
+    onTaskDragEnd(shouldCommit);
+  };
+
+  const onTaskPointerCancel = () => {
+    onTaskDragEnd(false);
+  };
+
+  const onTaskLostPointerCapture = () => {
+    onTaskDragEnd(false);
+  };
+
+  const onTaskDragEnd = (shouldMutate = false) => {
+    if (taskDragState.ghost && taskDragState.ghost.isConnected) {
+      taskDragState.ghost.remove();
+    }
+    clearTodoDragState();
+    document.body.classList.remove("dnd-active");
+    taskDragState.active = false;
+    taskDragState.pointerId = null;
+    taskDragState.sourceWidgetId = null;
+    taskDragState.sourceTaskId = null;
+    taskDragState.sourceTaskEl = null;
+    taskDragState.sourceList = null;
+    taskDragState.ghost = null;
+    taskDragState.placeholder = null;
+    taskDragState.destinationList = null;
+    taskDragState.destinationTaskId = null;
+    taskDragState.pointerOffsetX = 0;
+    taskDragState.pointerOffsetY = 0;
+    taskDragState.sourceRect = null;
+    if (!shouldMutate) return;
   };
 
   const onRecurrenceChange = () => {
@@ -544,7 +627,7 @@ export function render(container, context) {
     listEl.innerHTML = items
       .map(
         (item) => `
-          <div class="todo-item ${item.done ? "done" : ""}" role="listitem" data-task-id="${escapeHtml(item.id)}" draggable="true" style="--todo-task-color:${escapeHtml(taskRenderColor(item.color))};">
+          <div class="todo-item ${item.done ? "done" : ""}" role="listitem" data-task-id="${escapeHtml(item.id)}" style="--todo-task-color:${escapeHtml(taskRenderColor(item.color))};">
             <button
               type="button"
               class="todo-color-bar ${activeColorTaskId === item.id ? "is-open" : ""}"
@@ -638,11 +721,14 @@ export function render(container, context) {
         button.addEventListener("click", () => setTaskColor(taskId, button.dataset.taskColor));
       });
 
-      taskElement.addEventListener("dragstart", onTaskDragStart);
-      taskElement.addEventListener("dragover", onTaskDragOver);
-      taskElement.addEventListener("dragleave", onTaskDragLeave);
-      taskElement.addEventListener("drop", onTaskDrop);
-      taskElement.addEventListener("dragend", onTaskDragEnd);
+      const taskHandle = taskElement.querySelector(".todo-item-handle");
+      if (taskHandle) {
+        taskHandle.addEventListener("pointerdown", onTaskPointerDown);
+        taskHandle.addEventListener("pointermove", onTaskPointerMove);
+        taskHandle.addEventListener("pointerup", onTaskPointerUp);
+        taskHandle.addEventListener("pointercancel", onTaskPointerCancel);
+        taskHandle.addEventListener("lostpointercapture", onTaskLostPointerCapture);
+      }
     });
   };
 
@@ -665,9 +751,6 @@ export function render(container, context) {
   timeInput?.addEventListener("change", onTimeChange);
   weekdaySelect?.addEventListener("change", onWeekdayChange);
 
-  listEl?.addEventListener("dragover", onListDragOver);
-  listEl?.addEventListener("dragleave", onListDragLeave);
-  listEl?.addEventListener("drop", onListDrop);
   listEl?.addEventListener("scroll", onTodoColorPanelRelocate);
   listEl?.addEventListener("keydown", onTaskListKeydown);
   window.addEventListener("scroll", onTodoColorPanelRelocate, true);
@@ -687,13 +770,11 @@ export function render(container, context) {
       weekdaySelect?.removeEventListener("change", onWeekdayChange);
       document.removeEventListener("pointerdown", onDocumentPointerDown);
       document.removeEventListener("focusin", onDocumentFocusIn);
-      listEl?.removeEventListener("dragover", onListDragOver);
-      listEl?.removeEventListener("dragleave", onListDragLeave);
-      listEl?.removeEventListener("drop", onListDrop);
       listEl?.removeEventListener("scroll", onTodoColorPanelRelocate);
       listEl?.removeEventListener("keydown", onTaskListKeydown);
       window.removeEventListener("scroll", onTodoColorPanelRelocate, true);
       window.removeEventListener("resize", onTodoColorPanelRelocate);
+      onTaskDragEnd(false);
       closeColorPanel();
       syncCurrentWidget();
     },
