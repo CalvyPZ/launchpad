@@ -19,6 +19,7 @@ When in doubt, defer to the higher item in the list and surface the conflict to 
 
 ## Subagent invocation rules
 
+- **Mechanism:** “Invoke” means a Cursor **`Task` tool** call with the matching `subagent_type` (`team-lead`, `frontend-senior-dev`, `backend-senior-dev`, `qa-engineer`, and others per agent files). Prose-only handoffs do **not** count. See `.cursor/rules/chain-of-command.mdc` (Mandatory: Cursor Task tool).
 - **Team Lead** is invoked for sequencing, prioritisation, client translation, and `team/` doc authoring. Not for implementing application code unless the client specifically asks.
 - **Frontend Dev** owns `index.html`, `js/`, and `css/`. Invoke for any UI, widget, store, or PWA frontend asset change.
 - **Backend Dev** owns `sw.js`, `nginx-site.conf`, `docker-compose.yml`, and MIME/cache concerns. Invoke when any of these files change or need verification.

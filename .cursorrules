@@ -19,6 +19,12 @@ Stack: **static-first** — HTML5 + Alpine.js CDN + Tailwind Play CDN + vanilla 
 
 ---
 
+## Mandatory routing: Cursor Task subagents
+
+For **substantive** work (anything beyond read-only Q&A or a user-named narrow exception), **“invoke” means calling the Cursor `Task` tool** with the correct `subagent_type` — not describing a handoff in chat. The chat agent must **`Task` → `team-lead` first** after brief exploration; Team Lead then **`Task`s** Frontend, Backend, and QA as needed. Full rules: `.cursor/rules/chain-of-command.mdc`.
+
+---
+
 ## Team structure and subagent roles
 
 Five Cursor agent personas are defined under `.cursor/agents/`. Respect these roles:

@@ -30,6 +30,8 @@ Before planning or delegating, read:
 
 ## Registered subagents (for Cursor Tasks)
 
+**Delegation requirement:** When you assign work to Frontend, Backend, or QA, you must **spawn them with the Cursor `Task` tool** using the `subagent_type` in the table below (parallel `Task` calls when slices are independent). Do **not** only describe tasks in markdown for the parent chat agent to execute — that breaks the team workflow in `.cursor/rules/chain-of-command.mdc`.
+
 | Agent file | Cursor subagent_type | When to use |
 |------------|---------------------|-------------|
 | `.cursor/agents/frontend-senior-dev.md` | `frontend-senior-dev` | Any UI, widget, store, CSS, or PWA frontend asset change |
