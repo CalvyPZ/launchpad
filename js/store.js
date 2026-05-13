@@ -129,6 +129,7 @@ function mergeTodoState(raw) {
           id: String(t?.id || `t-${i}`),
           text: typeof t?.text === "string" ? t.text : "",
           done: Boolean(t?.done),
+          color: typeof t?.color === "string" && t.color ? t.color : null,
         }))
         .filter((t) => t.text.length || t.id)
     : base.tasks;
