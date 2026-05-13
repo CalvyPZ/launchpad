@@ -1,6 +1,34 @@
+# Dependencies
 node_modules/
+
+# OS / junk
 .DS_Store
 Thumbs.db
+
+# Logs
 *.log
+npm-debug.log*
+
+# Secrets and credentials (never commit)
 .env
 .env.*
+!.env.example
+*.pem
+*.key
+*.p12
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.keystore
+
+# Local-only scratch, temp exports, machine backups
+tmp-*
+root-test.txt
+api_blocked_backup/
+
+# IDE (local machine preferences)
+.idea/
+
+# Optional: local compose overrides with secrets or host paths
+docker-compose.override.yml
