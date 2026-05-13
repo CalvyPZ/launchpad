@@ -152,3 +152,18 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
 - While dragging tasks, all `.todo-list` elements participate as drop targets; insertion is driven by midpoint logic and visualized with `.dnd-task-placeholder` and `.is-list-drop-target`.
 - Pointer drag over state is reflected with `.dnd-over` and body suppression is handled via `body.dnd-active` (`user-select: none`, `touch-action: none`).
 - Mobile/touch: `touch-action: none` on drag handles (`.widget-handle`, `.todo-item-handle`), on drag ghosts (`.dnd-ghost-widget`, `.dnd-ghost-task`), and on `body.dnd-active` while a drag is in progress — so `.todo-list` and widget shells can scroll normally when not dragging.
+
+## Tools diagnostics widgets (Status + Log)
+
+- Diagnostics is owned by `js/site-diagnostics.js` with a local subscriber API (`subscribeLogs` / `subscribeProbes`, each returning a disposer) and a ring-buffer log capped at 500 entries.
+- Tools diagnostics widgets run on the tools panel only; shell still renders widget titles.
+- Probe outcomes are grouped by status (`ok`, `warn`, `crit`) and surfaced in Status rows:
+  - Healthy: `#22c55e` (`emerald`) + `text-emerald-400`.
+  - Warning: `#f59e0b` (`amber`) + `text-amber-400`.
+  - Critical: `#ef4444` (`red`) + `text-red-400`.
+- Status rows show the probe label, detail text, and per-result timestamp; overall header uses `text-xs` uppercase label + status chip-like row.
+- Log renders a scrollable terminal-style stream, newest entries appended at the bottom and with auto-scroll when already pinned.
+- Log filtering is binary: `All` and `Warn + Error` (`warn`/`crit`/`error` filter), defaulting to `All`.
+- Console integration captures `warn` and `error` only (not `console.log`) with recursion guard and routes to diagnostics log only.
+- Probe writes and console capture are append-only; manual refresh and automatic visibility/poll refresh are available for Status.
+- **Widget server sync** — two extra Status rows (merged after static probes): **Widgets GET (retrieve)** for the initial `/api/widgets` load, and **Widgets PUT (push)** for live outbound state (idle / debounced / in flight / offline queue / last failure). `js/app.js` calls `reportWidgetSyncRetrieve`, `reportWidgetSyncPushFromDashboard`, and `reportWidgetSyncPushEvent`; structured **info** log lines mark GET/PUT milestones, while existing `console.error` / `console.warn` on sync failures still flow through the Log via console hooks.

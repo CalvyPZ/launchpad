@@ -17,6 +17,14 @@ import * as clockWidget from "./widgets/clock.js";
 import * as notesWidget from "./widgets/notes.js";
 import * as todoWidget from "./widgets/todo.js";
 import * as placeholderWidget from "./widgets/placeholder.js";
+import * as statusToolsWidget from "./widgets/status-tools.js";
+import * as logToolsWidget from "./widgets/log-tools.js";
+import {
+  initSiteDiagnostics,
+  reportWidgetSyncRetrieve,
+  reportWidgetSyncPushFromDashboard,
+  reportWidgetSyncPushEvent,
+} from "./site-diagnostics.js";
 
 const widgetTypes = ["clock", "notes", "todo"];
 const widgetFactories = {
@@ -100,17 +108,24 @@ const addWidgetChoices = [
   { type: "todo", label: "To-Do", icon: "✅" },
 ];
 
-const toolsWidgetTypes = ["placeholder"];
+const toolsWidgetTypes = ["status-tools", "log-tools", "placeholder"];
 const toolsWidgetFactories = {
+  "status-tools": statusToolsWidget.render,
+  "log-tools": logToolsWidget.render,
   placeholder: placeholderWidget.render,
 };
 const toolsWidgetTypeSet = new Set(toolsWidgetTypes);
-const toolsAddWidgetChoices = [{ type: "placeholder", label: "Placeholder", icon: "◇" }];
+const toolsAddWidgetChoices = [
+  { type: "status-tools", label: "Status", icon: "📡" },
+  { type: "log-tools", label: "Log", icon: "📋" },
+];
 
 const widgetLabels = {
   clock: "Clock",
   notes: "Sticky Notes",
   todo: "To-Do",
+  "status-tools": "Status",
+  "log-tools": "Log",
   placeholder: "Placeholder",
 };
 
@@ -205,9 +220,7 @@ document.addEventListener("alpine:init", () => {
       saveToolsWidgets(this.toolsWidgets);
       const shouldSync = options.sync !== false;
       if (!shouldSync) {
-        // Same null-preservation rule as persistWidgets: don't fabricate a timestamp
-        // when _widgetsUpdatedAt is null, to avoid making defaults look newer than server data.
-        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt });
+        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
         return;
       }
       this.persistWidgetsDeferredSync();
@@ -216,21 +229,25 @@ document.addEventListener("alpine:init", () => {
     init() {
       this.widgetMapEl = this.$refs?.widgetGrid || document.getElementById("widget-grid");
       this.toolsGridEl = this.$refs?.toolsGrid || document.getElementById("tools-grid");
+      initSiteDiagnostics();
       this._onlineHandler = () => {
         this.online = true;
         if (this._widgetsNeedSync) {
           void this.syncToServer();
           this._armWidgetsSyncPoller();
           this._armWidgetsSyncPushTimer();
+          reportWidgetSyncPushFromDashboard(this);
           return;
         }
         this._armWidgetsSyncPoller();
         this._armWidgetsSyncPushTimer();
+        reportWidgetSyncPushFromDashboard(this);
       };
       this._offlineHandler = () => {
         this.online = false;
         this._disarmWidgetsSyncPoller();
         this._disarmWidgetsSyncPushTimer();
+        reportWidgetSyncPushFromDashboard(this);
       };
       this._pagehideHandler = () => {
         this.flushWidgetsBeforeExit("pagehide");
@@ -247,7 +264,6 @@ document.addEventListener("alpine:init", () => {
       const localDocument = loadWidgetsDocument();
       this.widgets = localDocument.widgets;
       this._widgetsUpdatedAt = localDocument.updatedAt;
-      console.log('[launchpad] init: localDocument.updatedAt =', this._widgetsUpdatedAt);
 
       this.toolsWidgets = loadToolsWidgets();
       this._visibilityHandler = () => {
@@ -289,6 +305,7 @@ document.addEventListener("alpine:init", () => {
         this._armWidgetsSyncPoller();
         this._armWidgetsSyncPushTimer();
       }
+      reportWidgetSyncPushFromDashboard(this);
     },
 
     _isWidgetEditSessionActive() {
@@ -430,6 +447,7 @@ document.addEventListener("alpine:init", () => {
         this._widgetsSyncTimer = null;
         void this.syncToServer();
       }, WIDGET_SYNC_DEBOUNCE_MS);
+      reportWidgetSyncPushFromDashboard(this);
     },
 
     flushWidgetsBeforeExit(_reason = "pageexit") {
@@ -467,10 +485,7 @@ document.addEventListener("alpine:init", () => {
       if (doSync) {
         return this.persistWidgetsDeferredSync();
       }
-      // Do not fabricate a timestamp when none exists — passing null lets saveWidgets
-      // store null, so reconcilePayloadLocally correctly treats local as "no timestamp"
-      // and will apply newer server data rather than treating defaults as authoritative.
-      saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt });
+      saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
     },
 
     _reconcilePayloadLocally(payload, trigger = "poll") {
@@ -493,8 +508,6 @@ document.addEventListener("alpine:init", () => {
         !hasRemoteTs && !hasLocalTs ? true
           : hasRemoteTs && hasLocalTs ? compare > 0
             : hasRemoteTs && !hasLocalTs;
-
-      console.log('[launchpad] reconcile(' + trigger + '): remoteTs =', payload.updatedAt, 'localTs =', localTs, 'remoteLooksNewer =', remoteLooksNewer);
 
       if ((this._widgetsNeedSync || this._isWidgetEditSessionActive()) && remoteLooksNewer) {
         this._cachePendingRemotePayload(payload);
@@ -545,9 +558,11 @@ document.addEventListener("alpine:init", () => {
         return;
       }
       this._initialServerSyncInFlight = true;
+      reportWidgetSyncRetrieve("attempt");
 
       try {
         if (!this.online) {
+          reportWidgetSyncRetrieve("offline");
           return;
         }
 
@@ -566,19 +581,28 @@ document.addEventListener("alpine:init", () => {
           if (trigger !== "visible") {
             console.error("Invalid widgets payload from server", raw);
           }
+          reportWidgetSyncRetrieve("invalid", "Missing usable widgets[] in server JSON");
           return;
         }
 
         this._reconcilePayloadLocally(payload, trigger);
         this._applyPendingRemotePayload();
+        const okDetail =
+          typeof payload.updatedAt === "string" && payload.updatedAt.trim()
+            ? `updatedAt ${payload.updatedAt}`
+            : "Server document merged";
+        reportWidgetSyncRetrieve("success", okDetail);
       } catch (error) {
         if (trigger !== "visible") {
           console.error("Widget sync fetch failed", error);
         }
+        const msg = error instanceof Error ? error.message : String(error);
+        reportWidgetSyncRetrieve("error", msg);
       } finally {
         this._initialServerSyncDone = true;
         this._initialServerSyncInFlight = false;
         this._widgetsPendingRemotePayload = null;
+        reportWidgetSyncPushFromDashboard(this);
       }
     },
 
@@ -586,10 +610,12 @@ document.addEventListener("alpine:init", () => {
       const useKeepalive = options.keepalive === true;
       const keepaliveSource = options.source || "manual";
       if (!this.online) {
+        reportWidgetSyncPushFromDashboard(this);
         return;
       }
 
       if (!this._widgetsNeedSync) {
+        reportWidgetSyncPushFromDashboard(this);
         return;
       }
 
@@ -600,7 +626,9 @@ document.addEventListener("alpine:init", () => {
         toolsWidgets: this.toolsWidgets,
       });
       const serializedPayload = JSON.stringify(nextPayload);
+      const syncAttemptedUpdatedAt = this._widgetsUpdatedAt;
       this._widgetsSyncInFlight = true;
+      reportWidgetSyncPushFromDashboard(this);
       const controller = useKeepalive ? null : new AbortController();
       if (controller) {
         this._widgetsSyncAbort = controller;
@@ -620,7 +648,10 @@ document.addEventListener("alpine:init", () => {
             ...(useKeepalive ? { keepalive: true } : {}),
           });
         } catch (error) {
-          if (error && error.name === "AbortError") return;
+          if (error && error.name === "AbortError") {
+            reportWidgetSyncPushEvent("aborted", "Request aborted", this);
+            return;
+          }
           if (useKeepalive && typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
             let beaconSent = false;
             try {
@@ -633,6 +664,7 @@ document.addEventListener("alpine:init", () => {
             }
             if (beaconSent) {
               console.warn(`Widget sync: sendBeacon queued (no response); keeping _widgetsNeedSync for next online PUT (${keepaliveSource})`);
+              reportWidgetSyncPushEvent("beacon_queued", keepaliveSource, this);
               return;
             }
             if (useKeepalive) {
@@ -642,23 +674,42 @@ document.addEventListener("alpine:init", () => {
           throw error;
         }
         if (!response.ok) {
-          console.error('[launchpad] PUT /api/widgets FAILED — status:', response.status);
-          throw new Error(`PUT ${WIDGETS_API_URL} failed: ${response.status}`);
+          let bodyText = "";
+          try {
+            bodyText = await response.text();
+          } catch {
+            bodyText = "";
+          }
+          const detail = bodyText ? ` ${bodyText.trim().slice(0, 240)}` : "";
+          throw new Error(
+            `PUT ${WIDGETS_API_URL} failed: ${response.status} ${response.statusText}${detail}`
+          );
         }
 
-        this._widgetsNeedSync = false;
+        const hadUnsentLocalChanges = this._widgetsUpdatedAt !== syncAttemptedUpdatedAt;
+        if (!hadUnsentLocalChanges) {
+          this._widgetsNeedSync = false;
+        }
         const body = await response.json().catch(() => null);
         const serverPayload = body ? loadWidgetPayloadFromApi(body) || pickServerPayload(body) : null;
-        if (serverPayload?.updatedAt) {
+        if (serverPayload?.updatedAt && this._widgetsUpdatedAt === syncAttemptedUpdatedAt) {
           this._widgetsUpdatedAt = serverPayload.updatedAt;
         }
+        const okDetail =
+          serverPayload?.updatedAt && typeof serverPayload.updatedAt === "string"
+            ? `server updatedAt ${serverPayload.updatedAt}`
+            : "PUT accepted";
+        reportWidgetSyncPushEvent("success", okDetail, this);
       } catch (error) {
         if (error && error.name === "AbortError") return;
         console.error("Widget sync save failed", error);
+        const msg = error instanceof Error ? error.message : String(error);
+        reportWidgetSyncPushEvent("fail", msg, this);
       } finally {
         this._widgetsSyncInFlight = false;
         this._widgetsSyncAbort = null;
         this._applyPendingRemotePayload();
+        reportWidgetSyncPushFromDashboard(this);
       }
 
     },

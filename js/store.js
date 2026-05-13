@@ -66,7 +66,14 @@ const DEFAULT_WIDGETS = [
   { id: "widget-todo", type: "todo", position: 2 },
 ];
 
-const DEFAULT_TOOLS_WIDGETS = [{ id: "widget-tools-placeholder", type: "placeholder", position: 0 }];
+const TOOLS_WIDGET_ID_STATUS = "widget-tools-status";
+const TOOLS_WIDGET_ID_LOG = "widget-tools-log";
+const TOOLS_LEGACY_PLACEHOLDER_ID = "widget-tools-placeholder";
+const DEFAULT_TOOLS_WIDGETS = [
+  { id: TOOLS_WIDGET_ID_STATUS, type: "status-tools", position: 0 },
+  { id: TOOLS_WIDGET_ID_LOG, type: "log-tools", position: 1 },
+];
+const TOOL_WIDGET_TYPES = new Set(["status-tools", "log-tools", "placeholder"]);
 
 export function defaultNotesState() {
   return { markdown: "", viewMode: "split" };
@@ -378,10 +385,20 @@ function normaliseToolsRows(rawItems) {
     }));
   }
 
-  const valid = rawItems
+  const isLegacySinglePlaceholderDefault = Array.isArray(rawItems)
+    && rawItems.length === 1
+    && rawItems[0]
+    && rawItems[0].type === "placeholder"
+    && rawItems[0].id === TOOLS_LEGACY_PLACEHOLDER_ID;
+
+  const normalisedInput = isLegacySinglePlaceholderDefault
+    ? DEFAULT_TOOLS_WIDGETS
+    : rawItems;
+
+  const valid = normalisedInput
     .map((item, index) => {
       const type = typeof item?.type === "string" ? item.type : null;
-      if (type !== "placeholder") return null;
+      if (!TOOL_WIDGET_TYPES.has(type)) return null;
       const id = String(item.id || `placeholder-${Date.now()}-${index}`);
       const position = clampToNumber(item.position, index);
       const visible = item.visible !== false;
@@ -395,7 +412,7 @@ function normaliseToolsRows(rawItems) {
 
       return {
         id,
-        type: "placeholder",
+        type,
         position,
         visible,
         title,
@@ -450,13 +467,7 @@ export function loadWidgetsDocument() {
 
 export function saveWidgets(widgets, options = {}) {
   const payload = normaliseWidgetRows(widgets || []);
-  // When the caller explicitly passes updatedAt (even as null), preserve it so that
-  // a fresh-tab init write does not fabricate a "now" timestamp that would make
-  // default widgets appear newer than real server data during reconcile.
-  // When no updatedAt key is present in options at all, fall back to now as before.
-  const updatedAt = 'updatedAt' in options
-    ? (parseUpdatedAt(options.updatedAt) || null)
-    : new Date().toISOString();
+  const updatedAt = parseUpdatedAt(options.updatedAt) || new Date().toISOString();
   localStorage.setItem(
     WIDGETS_KEY,
     JSON.stringify({
