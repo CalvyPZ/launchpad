@@ -1,0 +1,1 @@
+﻿const target = new EventTarget(); export function emit(event, data) { target.dispatchEvent(new CustomEvent(event, { detail: data })); } export function on(event, handler) { target.addEventListener(event, handler); } export function off(event, handler) { target.removeEventListener(event, handler); }

@@ -1,0 +1,19 @@
+{
+  "name": "Calvy Launchpad",
+  "short_name": "Calvy LP",
+  "description": "Open Calvy Launchpad to start work, see what needs attention, and keep your setup clear from one place.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1c1c1c",
+  "theme_color": "#1c1c1c",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

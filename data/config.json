@@ -1,0 +1,35 @@
+﻿{
+  "site": {
+    "title": "Calvy Launchpad",
+    "description": "Open Calvy Launchpad to start work, see what needs attention, and keep your setup clear from one place.",
+    "theme": "dark",
+    "accentColor": "#2dd4bf"
+  },
+  "widgets": {
+    "defaultLayout": [
+      { "id": "clock-1", "type": "clock", "col": 1, "row": 1, "colSpan": 1, "rowSpan": 1 },
+      { "id": "search-1", "type": "search", "col": 2, "row": 1, "colSpan": 2, "rowSpan": 1 },
+      { "id": "bookmarks-1", "type": "bookmarks", "col": 1, "row": 2, "colSpan": 2, "rowSpan": 1 },
+      { "id": "notes-1", "type": "notes", "col": 3, "row": 2, "colSpan": 1, "rowSpan": 1 }
+    ],
+    "registry": ["clock", "search", "bookmarks", "notes"]
+  },
+  "bookmarks": {
+    "default": [
+      { "id": "bm-1", "label": "GitHub", "url": "https://github.com", "icon": "🐙" },
+      { "id": "bm-2", "label": "YouTube", "url": "https://youtube.com", "icon": "▶" },
+      { "id": "bm-3", "label": "Gmail", "url": "https://mail.google.com", "icon": "✉" },
+      { "id": "bm-4", "label": "Reddit", "url": "https://reddit.com", "icon": "🔴" },
+      { "id": "bm-5", "label": "Hacker News", "url": "https://news.ycombinator.com", "icon": "🟠" },
+      { "id": "bm-6", "label": "ChatGPT", "url": "https://chatgpt.com", "icon": "🤖" }
+    ]
+  },
+  "search": {
+    "defaultEngine": "duckduckgo",
+    "engines": {
+      "google": "https://www.google.com/search?q=",
+      "duckduckgo": "https://duckduckgo.com/?q=",
+      "bing": "https://www.bing.com/search?q="
+    }
+  }
+}

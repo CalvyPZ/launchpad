@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en" x-data="launchpad" x-cloak>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Calvy Launchpad</title>
+    <meta
+      name="description"
+      content="Open Calvy Launchpad to start work, see what needs attention, and keep your setup clear from one place."
+    />
+
+    <!-- PWA -->
+    <meta name="theme-color" content="#1c1c1c" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Calvy Launchpad" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/icon.svg" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Tailwind config — must be set before CDN script loads -->
+    <script>
+      tailwind = {
+        config: {
+          theme: {
+            extend: {
+              colors: {
+                bg:       "#1c1c1c",
+                surface:  "#242424",
+                elevated: "#2e2e2e",
+                border:   "#3d3d3d",
+                accent:   "#2dd4bf",
+                "text-1": "#f0f0f0",
+                "text-2": "#9a9a9a",
+                "text-3": "#5c5c5c",
+              },
+              fontFamily: {
+                sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+              },
+              borderRadius: {
+                card: "10px",
+                btn:  "6px",
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+
+  <body class="min-h-screen bg-bg text-text-1 antialiased">
+    <div
+      role="status"
+      aria-live="polite"
+      class="border-b border-border bg-elevated px-5 py-2 text-center text-sm text-text-2"
+      x-show="!online"
+      x-cloak
+    >
+      You are offline. This page is served from your device cache; reconnect for the latest updates and full styling.
+    </div>
+    <div class="app-shell min-h-screen flex flex-col">
+
+      <!-- Header -->
+      <header class="site-header border-b border-border bg-surface">
+        <div class="mx-auto max-w-6xl px-5 py-4">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+
+            <!-- Branding + title -->
+            <div class="flex flex-wrap items-center gap-4 min-w-0">
+              <img
+                src="icons/logo-lockup.svg"
+                width="248"
+                height="36"
+                alt=""
+                role="presentation"
+                class="h-8 w-auto shrink-0 sm:h-9"
+              />
+              <h1
+                class="text-2xl sm:text-3xl font-semibold leading-tight tracking-tight text-text-1 cursor-text outline-none min-w-0"
+                contenteditable="true"
+                x-text="siteTitle"
+                @blur="setSiteTitle($event.target.textContent)"
+                spellcheck="false"
+              ></h1>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex flex-wrap items-center gap-2">
+
+              <!-- Clock display -->
+              <div class="inline-flex flex-col rounded-card border border-border bg-elevated px-3 py-2 min-w-[10rem]">
+                <p class="text-text-1 font-medium text-sm leading-none" x-text="clockTime"></p>
+                <p class="text-text-3 text-xs mt-1" x-text="clockDate"></p>
+              </div>
+
+              <!-- Edit toggle -->
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-btn border border-border bg-elevated px-3 py-2 text-sm font-medium text-text-2 transition-colors hover:border-accent hover:text-accent"
+                :class="editMode ? 'border-accent text-accent' : ''"
+                @click="toggleEditMode()"
+                :aria-pressed="editMode"
+              >
+                <span x-text="editMode ? '✖' : '✎'" aria-hidden="true"></span>
+                <span x-text="editMode ? 'Done' : 'Edit'"></span>
+              </button>
+
+              <!-- Add widget button + picker dropdown -->
+              <div class="relative" x-show="editMode">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1.5 rounded-btn bg-accent px-3 py-2 text-sm font-semibold text-bg transition-opacity hover:opacity-90"
+                  @click="addWidgetOpen = !addWidgetOpen"
+                  aria-haspopup="listbox"
+                  :aria-expanded="addWidgetOpen"
+                >
+                  <span aria-hidden="true">＋</span>
+                  Add Widget
+                </button>
+
+                <!-- Picker dropdown -->
+                <div
+                  class="widget-picker"
+                  x-show="addWidgetOpen"
+                  x-transition:enter="transition ease-out duration-100"
+                  x-transition:enter-start="opacity-0 translate-y-1"
+                  x-transition:enter-end="opacity-100 translate-y-0"
+                  x-transition:leave="transition ease-in duration-75"
+                  x-transition:leave-start="opacity-100 translate-y-0"
+                  x-transition:leave-end="opacity-0 translate-y-1"
+                  @click.outside="addWidgetOpen = false"
+                  role="listbox"
+                  aria-label="Choose a widget to add"
+                >
+                  <p class="widget-picker-label">Add a widget</p>
+                  <button type="button" role="option" @click="addWidget('clock')">
+                    <span aria-hidden="true">🕐</span> Clock
+                  </button>
+                  <button type="button" role="option" @click="addWidget('notes')">
+                    <span aria-hidden="true">📝</span> Sticky Notes
+                  </button>
+                  <button type="button" role="option" @click="addWidget('todo')">
+                    <span aria-hidden="true">✅</span> To-Do
+                  </button>
+                </div>
+              </div>
+
+              <p
+                class="edit-mode-hint basis-full w-full max-w-xl text-xs text-text-2 sm:text-sm"
+                x-show="editMode"
+                x-cloak
+              >
+                <strong class="text-text-1">Edit mode:</strong> drag a widget&rsquo;s corner to resize; use the header field to rename. Drag <span aria-hidden="true">⠿</span> to reorder.
+              </p>
+
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Widget grid -->
+      <main class="mx-auto w-full max-w-6xl flex-1 px-5 py-6">
+        <section id="widget-grid" class="widget-grid">
+          <!-- Widgets injected by app.js -->
+        </section>
+      </main>
+
+      <footer class="border-t border-border py-3 text-center text-xs text-text-3">
+        Calvy Launchpad
+      </footer>
+    </div>
+
+    <!-- Markdown + sanitiser for Sticky Notes preview: globals window.marked, window.DOMPurify (cdnjs UMD builds) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.5/purify.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <!-- App module (must come before Alpine so alpine:init listener registers in time) -->
+    <script type="module" src="js/app.js"></script>
+    <!-- Alpine — defer keeps it after app.js module in execution order -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Service worker registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(function () {});
+      }
+    </script>
+  </body>
+</html>

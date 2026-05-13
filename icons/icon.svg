@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-labelledby="calvyLaunchpadIconTitle">
+  <title id="calvyLaunchpadIconTitle">Calvy Launchpad</title>
+  <!-- Rocket icon: favicon-safe on #1c1c1c pad. -->
+  <rect width="32" height="32" rx="6" fill="#1c1c1c"/>
+  <g transform="translate(1 0.5)">
+    <path d="M16 5 L19.4 13.8 L16 12.3 L12.6 13.8 Z" fill="#2dd4bf"/>
+    <path
+      d="M12.4 13.2 L19.6 13.2 L22 26.8 L16 23.8 L10 26.8 Z"
+      fill="#2e2e2e"
+      stroke="#3d3d3d"
+      stroke-width="0.85"
+      stroke-linejoin="round"
+    />
+    <circle cx="16" cy="17.2" r="2.2" fill="#242424" stroke="#3d3d3d" stroke-width="0.6"/>
+    <path d="M10.2 23.5 L6.2 30.2 L10.4 26 Z" fill="#242424" stroke="#3d3d3d" stroke-width="0.6" stroke-linejoin="round"/>
+    <path d="M21.8 23.5 L25.8 30.2 L21.6 26 Z" fill="#242424" stroke="#3d3d3d" stroke-width="0.6" stroke-linejoin="round"/>
+    <path d="M13 26.2 L16 30.2 L19 26.2 Z" fill="#2dd4bf"/>
+  </g>
+</svg>
