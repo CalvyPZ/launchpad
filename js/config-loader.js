@@ -1,5 +1,5 @@
-﻿const CONFIG_URL = '"'"'data/config.json'"'"';
-const USER_CONFIG_KEY = '"'"'calvybots_user_config'"'"';
+﻿const CONFIG_URL = 'data/config.json';
+const USER_CONFIG_KEY = 'calvybots_user_config';
 
 let loaded = false;
 let baseConfig = {};
@@ -7,7 +7,7 @@ let userConfig = {};
 let mergedConfig = {};
 
 function clone(value) {
-  if (typeof structuredClone === '"'"'function'"'"') {
+  if (typeof structuredClone === 'function') {
     return structuredClone(value);
   }
 
@@ -22,12 +22,12 @@ function readUserOverridesFromStorage() {
     }
 
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== '"'"'object'"'"' || Array.isArray(parsed)) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return {};
     }
 
-    if ('"'"'schemaVersion'"'"' in parsed && '"'"'value'"'"' in parsed) {
-      if (!parsed.value || typeof parsed.value !== '"'"'object'"'"' || Array.isArray(parsed.value)) {
+    if ('schemaVersion' in parsed && 'value' in parsed) {
+      if (!parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) {
         return {};
       }
 
@@ -50,7 +50,7 @@ function mergeDeep(target, source) {
     if (
       sourceValue &&
       targetValue &&
-      typeof sourceValue === '"'"'object'"'"' &&
+      typeof sourceValue === 'object' &&
       !Array.isArray(sourceValue) &&
       !Array.isArray(targetValue)
     ) {
@@ -65,7 +65,7 @@ function mergeDeep(target, source) {
 }
 
 function emitUpdatedConfig(newValue) {
-  const event = new CustomEvent('"'"'config:updated'"'"', {
+  const event = new CustomEvent('config:updated', {
     detail: {
       config: clone(newValue)
     }
@@ -75,11 +75,11 @@ function emitUpdatedConfig(newValue) {
 }
 
 function setByPath(obj, path, value) {
-  if (typeof path !== '"'"'string'"'"' || !path) {
+  if (typeof path !== 'string' || !path) {
     return obj;
   }
 
-  const parts = path.split('"'"'.'"'"').filter(Boolean);
+  const parts = path.split('.').filter(Boolean);
   if (!parts.length) {
     return obj;
   }
@@ -91,7 +91,7 @@ function setByPath(obj, path, value) {
     const key = parts[i];
     const existing = cursor[key];
 
-    if (!existing || typeof existing !== '"'"'object'"'"' || Array.isArray(existing)) {
+    if (!existing || typeof existing !== 'object' || Array.isArray(existing)) {
       cursor[key] = {};
     } else {
       cursor[key] = clone(existing);
@@ -120,14 +120,14 @@ async function initialize() {
 
   let remoteConfig = {};
   try {
-    const response = await fetch(CONFIG_URL, { cache: '"'"'no-store'"'"' });
+    const response = await fetch(CONFIG_URL, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`Unable to load config: ${response.status}`);
     }
     remoteConfig = await response.json();
   } catch (error) {
     remoteConfig = {};
-    console.error('"'"'[config-loader] Falling back to empty config'"'"', error);
+    console.error('[config-loader] Falling back to empty config', error);
   }
 
   baseConfig = remoteConfig || {};

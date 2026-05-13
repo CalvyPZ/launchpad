@@ -1,0 +1,65 @@
+---
+description: Team workflow, process conventions, and coordination rules. Apply to all agents when authoring team/ docs or managing delegation.
+globs: ["team/**/*.md", ".cursor/agents/**/*.md", "tests/**/*.md"]
+alwaysApply: true
+---
+
+# Workflow and Process Rules — CalvyBots Launchpad
+
+## Source of truth hierarchy
+
+1. **Client direction** (highest) — what the client said, recorded in `team/lead-status.md`.
+2. **Delegation brief** — `team/delegation-v4.md` (product scope, tech constraints, per-role tasks).
+3. **Product brief** — `team/brief.md` (architecture, goals, non-goals, style baseline).
+4. **Style guide** — `team/style-guide.md` (currently v3; update to v4 when cyan token pass lands).
+5. **QA artifacts** — `team/qa-complete-v4.md`, `team/qa-status.md`, `tests/test-plan.md`, `tests/usability-checklist.md`.
+6. **Assignment files** — `team/assignments-*.md` (concrete file-scoped tasks, definition of done).
+
+When in doubt, defer to the higher item in the list and surface the conflict to Team Lead.
+
+## Subagent invocation rules
+
+- **Team Lead** is invoked for sequencing, prioritisation, client translation, and `team/` doc authoring. Not for implementing application code unless the client specifically asks.
+- **Frontend Dev** owns `index.html`, `js/`, and `css/`. Invoke for any UI, widget, store, or PWA frontend asset change.
+- **Backend Dev** owns `sw.js`, `nginx-site.conf`, `docker-compose.yml`, and MIME/cache concerns. Invoke when any of these files change or need verification.
+- **QA** runs after Frontend or Backend deliver a feature. Invoke to produce structured Pass/Fail verdicts, populate `team/qa-*.md`, and propose interactive follow-up items.
+- **Senior Cleanup Engineer** — **client-only hard rule.** Never invoke this agent as part of autonomous delegation or as a "housekeeping" step. Only the client may start it by name.
+
+## Model selection
+
+- **Default for all agents:** `gpt-5.3-codex-spark-preview` (Codex 3.5 Spark preview).
+- **Escalation:** request Team Lead approval; Team Lead may assign a stronger model (e.g. `claude-4.6-sonnet-medium-thinking`) for a specific task. Opus is **never** selected without explicit client confirmation.
+- Escalation does not mean re-assigning to the same subagent on a stronger model — Team Lead takes over the work item, ends the requesting subagent run, and starts a new task on the approved model.
+
+## Delegation format
+
+Assignment files (`team/assignments-*.md`) must include for each task:
+- **Owner** (Frontend / Backend / QA).
+- **Files touched** (explicit paths).
+- **Acceptance bullets** (observable, testable criteria).
+- **Definition of done** (all bullets met from static + interactive review).
+
+## QA output format
+
+QA verdicts must be structured:
+- **Pass** / **Pass with notes** / **Blocked / Fail**.
+- Finding list with: severity (`High` / `Medium` / `Low`), evidence (file:line reference), expected vs actual.
+- **Sign-off recommendation** for Team Lead.
+- Update `team/qa-status.md` and `team/qa-complete-v4.md` **only when the user explicitly asks** for repo updates; otherwise return verdict in chat.
+
+## Documentation conventions
+
+- Dated updates in `team/brief.md`: `## Update YYYY-MM-DD` section appended at bottom.
+- Never delete a QA verdict section — append new cycles (`## Cycle N`) below the previous one.
+- Stale docs (`frontend-complete-v*.md`, `backend-complete-v*.md`) accumulate as history — leave them unless Senior Cleanup Engineer is explicitly tasked with removal.
+- `team/lead-status.md` is the live manager log — Team Lead updates it after each delegation cycle.
+
+## Things agents must never do
+
+- Run Python.
+- Create automated test harnesses or test runner config files.
+- Create README files (unless explicitly requested by the client).
+- Invoke `senior-cleanup-engineer` autonomously.
+- Add new CDN dependencies to `index.html` without Team Lead or Frontend Dev being invoked.
+- Modify `team/` files from Backend or QA roles without Team Lead coordination (QA updates QA docs; Backend updates Backend docs).
+- Create files in `.cursor/agents/` without Team Lead delegation.

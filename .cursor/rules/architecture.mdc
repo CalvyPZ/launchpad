@@ -1,0 +1,55 @@
+---
+description: Core architecture constraints for the CalvyBots static dashboard. Apply to all JS, HTML, and CSS work.
+globs: ["js/**/*.js", "index.html", "css/**/*.css", "sw.js"]
+alwaysApply: true
+---
+
+# Architecture Rules — CalvyBots Launchpad
+
+## Static-first: non-negotiable
+
+This project has **no build step**. Every file in the repo is served directly by nginx.
+
+- No `npm install` for the web app (only `api/` service has its own node context).
+- No Webpack, Vite, Rollup, Parcel, or any bundler.
+- No TypeScript — plain ES module JavaScript only.
+- No JSX or template compilation.
+- All dependencies via **CDN script tags** in `index.html`.
+
+## Module loading
+
+- `js/app.js` is loaded as `type="module"` from `index.html`.
+- Widget modules use **relative imports**: `import { render } from './widgets/clock.js'`.
+- No dynamic `import()` of external URLs — only same-origin module paths.
+- `js/widget-registry.js`, `js/config-loader.js`, and `js/event-bus.js` are present but **not currently imported by `app.js`**. Do not wire them in unless the Team Lead explicitly delegates that integration.
+
+## Widget factory contract
+
+Each widget in `js/widgets/` must export a `render(container, widgetRow, dashboard)` function:
+- `container` — the DOM element to mount into.
+- `widgetRow` — the widget's data record from the store (`{ id, type, title, ... }`).
+- `dashboard` — Alpine.js component reference for cross-widget coordination.
+- Must return a `destroy()` function (or be idempotent on re-render).
+- Must **not** insert the widget title — the shell handles title rendering.
+- Must **not** write to a shared global localStorage key across instances.
+
+## Active vs dormant widget types
+
+Active (appear in Add Widget picker): `clock`, `notes`, `todo`.
+Dormant (kept for migration, hidden from picker): `bookmarks`, `search`, `sysinfo`.
+
+Never add dormant types back to the picker without a Team Lead delegation task.
+
+## localStorage — `calvybots_` namespace
+
+All runtime persistence uses keys prefixed `calvybots_`. The canonical layout key is `calvybots_widgets`, which stores an array of widget rows. Each row embeds its own state payload (`notesState` or `todoState`) so there is no separate per-type global key.
+
+Legacy key migration (`calvybots_notes`, `calvybots_todo`) is handled by `migrateLegacyIfNeeded()` in `js/store.js` and must be called on `loadWidgets()` and on error recovery paths.
+
+## Alpine.js boundary
+
+`index.html` declares `x-data="launchpad"` at the root. All Alpine directives (`x-show`, `x-bind`, `@click`, `x-for`) must remain inside that root or inside explicit nested `x-data` scopes. Do not mix Alpine with raw DOM manipulation in the same element subtree.
+
+## Event system
+
+`js/event-bus.js` exports a lightweight `EventTarget` wrapper. Custom events (`config:updated`, `store:changed`) must use this bus — do not dispatch on `document` for new events. Existing `config:updated` dispatches on `document` for backward compat; do not change that without Team Lead approval.

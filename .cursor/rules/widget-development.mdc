@@ -1,0 +1,104 @@
+---
+description: Widget development guidelines — data model, persistence, Markdown safety, To-Do recurrence, and resize patterns.
+globs: ["js/widgets/**/*.js", "js/store.js", "js/app.js"]
+alwaysApply: false
+---
+
+# Widget Development Rules — CalvyBots Launchpad
+
+## Per-instance isolation
+
+Every widget instance must use **scoped state** inside its `calvybots_widgets` layout row. No widget type may use a shared global key that collides across instances.
+
+```js
+// Correct: state lives inside the widget row
+{ id: 'notes-abc123', type: 'notes', title: 'My Notes', notesState: { content: '...', mode: 'split' } }
+
+// Wrong: shared global key across all notes instances
+localStorage.getItem('calvybots_notes') // ← only for legacy migration
+```
+
+## Stable IDs
+
+Widget `id` values must be generated once at creation time and never re-generated on reload. Prefer a short UUID-style string or a timestamped random suffix. The `id` is the persistence key — changing it loses the user's data.
+
+## Widget render contract
+
+```js
+// Expected export shape for js/widgets/*.js
+export function render(container, widgetRow, dashboard) {
+  // Mount UI into container.
+  // widgetRow: { id, type, title, notesState?, todoState?, ... }
+  // dashboard: Alpine component reference (for editMode, online, etc.)
+
+  // Return cleanup function
+  return function destroy() {
+    // Clear intervals, remove listeners, cancel observers
+  };
+}
+```
+
+Do not export `mount` or `init` — the current `app.js` uses `render`. The `data/schema.md` documents the older `mount/init` contract which is not the live API.
+
+## Markdown in Notes widget
+
+- Use `window.marked` (from cdnjs CDN) for parsing.
+- Always sanitize with `window.DOMPurify.sanitize(html)` before assigning to `innerHTML`.
+- Never use `marked.parse(content)` result directly without DOMPurify.
+- Guard for thenable `marked.parse` (may return Promise in future major):
+  ```js
+  const result = marked.parse(content);
+  const html = (result && typeof result.then === 'function')
+    ? await result
+    : result;
+  container.innerHTML = DOMPurify.sanitize(html);
+  ```
+- When CDN libraries are unavailable (offline): show a clear message distinguishing "libraries loading" vs "offline — preview unavailable". Do not show a generic spinner indefinitely.
+
+## To-Do recurrence model
+
+Supported reset schedules: `never` | `daily` | `weekly`.
+
+```js
+// todoState shape
+{
+  tasks: [{ id, text, done }],
+  recurrence: 'daily' | 'weekly' | 'never',
+  resetTime: 'HH:MM',   // 24h local time, e.g. '06:00'
+  resetDay: 0–6,        // weekday (0=Sunday) for weekly; ignored for daily/never
+  lastResetDate: 'YYYY-MM-DD'  // ISO date of last reset, device local
+}
+```
+
+Reset behavior:
+- **never:** no auto reset, ever.
+- **daily:** clear `done: true` flags when device-local date has advanced past `lastResetDate` and the current time is at or past `resetTime`.
+- **weekly:** same as daily but also check weekday matches `resetDay`.
+- Reset clears only the `done` flag on existing tasks — it does **not** delete task text or IDs.
+
+Evaluation triggers: `loadWidgets()`, `visibilitychange` (visible), and a 60s `setInterval` that arms on tab visible and disarms (clears interval) when tab hides. Document DST/timezone edge cases in a code comment.
+
+## Resize behavior
+
+- CSS `resize` on `.widget-content` is gated on edit mode only.
+- `ResizeObserver` persists the new dimensions back to the widget row in the store.
+- Minimum widget size: ensure title and at least one line of content remain visible.
+- Sub-640px viewports: disable CSS resize to prevent scroll conflicts (`resize: none` via media query or class).
+- Resize handle must be ≥10×10px and reachable without hover.
+
+## Edit mode and rename
+
+- Widget display names are stored in the `title` field of the layout row.
+- Rename is an inline input inside the widget shell, visible in edit mode.
+- Default title falls back to `widgetLabels[type]` if the user hasn't customized it.
+- After rename, call `persistWidgets()` once — not on every keystroke (debounce or on blur/enter).
+- The shell renders the title; the widget renderer must not render it again.
+
+## Legacy migration
+
+`migrateLegacyIfNeeded()` in `js/store.js` must be called:
+1. From `loadWidgets()` on every startup.
+2. After `addWidget()` appends a new row (catches users who add a widget before any legacy was migrated).
+3. Inside `loadWidgets()` error recovery paths.
+
+The function merges `calvybots_notes` content into the first `notes` widget row and `calvybots_todo` content into the first `todo` widget row, then removes the legacy keys. If no target widget row exists, leave legacy keys in place (documented escape hatch — QA should verify this case manually).
