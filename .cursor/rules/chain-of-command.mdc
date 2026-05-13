@@ -7,26 +7,37 @@ alwaysApply: true
 
 All substantive user requests follow this sequence. Do not skip stages or merge roles in one turn unless the user explicitly asks for a narrow exception (for example, a one-line typo fix).
 
+## Mandatory: Cursor Task tool (not chat-only handoffs)
+
+In this project, **“invoke” / “delegate” / “hand to Team Lead” means a real Cursor `Task` tool call** with the correct `subagent_type` (`team-lead`, `frontend-senior-dev`, `backend-senior-dev`, `qa-engineer`, `explore`, `generalPurpose` as appropriate). Writing a prose handoff (“Handing to Team Lead…”) **without** a `Task` call **does not** satisfy these rules and is **forbidden** for substantive work.
+
+- **Primary (chat) agent on substantive user requests:** After at most a **short** readonly pass (quick file locate / constraint check), your **next step must be** `Task` with `subagent_type="team-lead"`. Pass the **full user request**, any paths or findings from exploration, and ask the Team Lead to produce assignments and spawn dev/QA tasks per `.cursor/agents/team-lead.md`. Do **not** implement product changes, run multi-step implementation, or drive QA yourself in that same turn before Team Lead has run via `Task`.
+- **Team Lead subagent:** When assigning Frontend, Backend, or QA work, use **additional** `Task` calls with `subagent_type` set to `frontend-senior-dev`, `backend-senior-dev`, or `qa-engineer` (parallel `Task` calls allowed when independent). The Team Lead coordinates the cycle; it does not replace dev/QA `Task` runs with a single monolithic answer unless the user explicitly asked for Team Lead-only output.
+- **Exempt requests (no Team Lead `Task` required):** Purely informational / read-only questions with **no** repo edits; or the user **explicitly** asked for a **narrow** exception (e.g. one-line typo, single-file obvious fix) and named that exception.
+
 ## Flow
 
-1. **Initial exploration (readonly)** — Clarify scope, locate relevant files, and summarize constraints. No implementation yet unless the request is trivial and clearly isolated.
-2. **Team Lead (`team-lead`)** — After exploration, route outcomes to the Team Lead. The Team Lead breaks work into owned tasks, updates or references `team/lead-status.md` / delegation artifacts as appropriate, and assigns Frontend, Backend, or QA via the usual delegation rules in `workflow-and-process.mdc`.
-3. **Implementation** — Frontend or Backend agents (or the main agent acting in that role) execute only what the Team Lead delegated. Respect file ownership in `.cursorrules`. The Team Lead may delegate **multiple tasks in parallel** (for example separate Frontend and Backend slices) to speed delivery; each stream still has clear ownership and acceptance bullets.
-4. **QA (`qa-engineer`)** — When delegated implementation is done (per stream or when the Lead defines an integration checkpoint), run QA: structured verdict (Pass / Pass with notes / Blocked or Fail), findings with severity and evidence, sign-off recommendation. Update `team/qa-*.md` only when the user asked for repo updates.
-5. **Return to manager (Team Lead)** — Deliver the QA summary to the Team Lead. If scope, risk, or quality is not yet acceptable, the Team Lead **continues the cycle** (new or revised assignments, fixes, then QA again).
+1. **Initial exploration (readonly)** — Clarify scope, locate relevant files, and summarize constraints. Keep this brief; no implementation unless the request is trivial and explicitly exempt above.
+2. **Team Lead (`team-lead`)** — **Required `Task`:** `subagent_type="team-lead"`. The Team Lead breaks work into owned tasks, updates or references `team/lead-status.md` / delegation artifacts as appropriate, and assigns Frontend, Backend, or QA via `Task` per `workflow-and-process.mdc`.
+3. **Implementation** — **Required `Task`:** Frontend or Backend agents execute only what the Team Lead delegated (`frontend-senior-dev` / `backend-senior-dev`). Respect file ownership in `.cursorrules`. The Team Lead may delegate **multiple tasks in parallel** (for example separate Frontend and Backend slices) to speed delivery; each stream still has clear ownership and acceptance bullets.
+4. **QA (`qa-engineer`)** — **Required `Task`:** `subagent_type="qa-engineer"` when delegated implementation is done (per stream or when the Lead defines an integration checkpoint). Structured verdict (Pass / Pass with notes / Blocked or Fail), findings with severity and evidence, sign-off recommendation. Update `team/qa-*.md` only when the user asked for repo updates.
+5. **Return to manager (Team Lead)** — Deliver the QA summary to the Team Lead via **`Task` with `subagent_type="team-lead"`** (or continuation of the same Team Lead run if the product flow keeps one lead thread—still no skipping the Lead gate). If scope, risk, or quality is not yet acceptable, the Team Lead **continues the cycle** (new or revised assignments, fixes, then QA again).
 6. **Pull request completion (Team Lead only)** — The Team Lead **creates, updates, or marks the pull request complete** (for example ready for merge, or merged per project policy) only when they are **satisfied** that dev work and QA outcomes meet acceptance. Until then, keep cycling; do not treat “QA Pass” alone as permission to close the PR without Team Lead sign-off.
 
 ## Rules
 
 - **No end-around:** Do not ship feature code from “exploration only” without Team Lead delegation for that slice of work.
-- **One hat at a time:** In a single response, prefer one primary role; if you must summarize for the next role, state the handoff explicitly.
+- **No chat-only delegation:** Do not substitute narrative role-play for `Task` subagent runs on substantive requests.
+- **One hat at a time:** In a single response, prefer one primary role; if you must summarize for the next role, state the handoff explicitly **and** use `Task` where this document requires it.
 - **Cycle until complete:** A single QA Pass does not close the initiative until the Team Lead confirms scope is satisfied against client direction and `team/delegation-v4.md` / `team/brief.md` as applicable.
 - **Quality + throughput:** Parallel dev work is allowed under Team Lead coordination; QA and the PR completion gate prevent shipping before the Lead integrates verdicts and remaining gaps.
 
 ## Example handoff (chat)
 
-After exploration: “Handing to Team Lead: [2–3 bullets]. Request: delegate implementation and acceptance criteria.”
+Optional **human-readable captions** alongside required `Task` calls:
 
-After implementation: “Handing to QA: [what changed, paths]. Request: verdict + sign-off recommendation for Team Lead.”
+After exploration: “Handing to Team Lead: [2–3 bullets]. Request: delegate implementation and acceptance criteria.” **Plus** `Task` → `team-lead`.
 
-After QA: “Handing to Team Lead: [verdict summary]. Request: close cycle, assign follow-ups, or finalize PR when satisfied.”
+After implementation: “Handing to QA: [what changed, paths]. Request: verdict + sign-off recommendation for Team Lead.” **Plus** `Task` → `qa-engineer`.
+
+After QA: “Handing to Team Lead: [verdict summary]. Request: close cycle, assign follow-ups, or finalize PR when satisfied.” **Plus** `Task` → `team-lead` if a new lead cycle is needed.

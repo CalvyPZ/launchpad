@@ -79,6 +79,8 @@ Workflow skills are in `.cursor/skills/`:
 
 ### Rules
 
+- **Substantive work uses Cursor `Task` subagents** — see `.cursor/rules/chain-of-command.mdc`: the chat agent must not substitute prose handoffs for `Task` calls (`team-lead` first, then dev/QA `subagent_type`s as delegated).
+
 Workspace rules are in `.cursor/rules/`:
 - `architecture.mdc` — static-first constraints, module loading, widget contract, localStorage schema
 - `visual-design.mdc` — cyan/dark palette tokens, component patterns, motion, accessibility
