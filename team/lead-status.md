@@ -473,6 +473,43 @@ Execute **`team/assignments-widget-sync-interval-flush.md`**; Frontend lands fir
 
 **Cycle status:** **Signed off** for Team Lead tracking; optional human smoke + any client demo rehearsal remain operational follow-ups, not open dev items for this track.
 
+---
+
+## Critical production bug — dashboard resets every ~1 min (2026-05-13)
+
+### Manager summary
+
+Client reported: dashboard at https://web.calvy.com.au resets to default layout roughly every minute. Edits are visible in a new private window 10 seconds later, but after ~1 minute everything reverts to the `data/widgets.json` defaults.
+
+Root-cause analysis (from prior exploration) identified three likely causes in priority order:
+
+- **A (primary):** API server process crashes/restarts periodically. Writes succeed transiently in the async queue but the crash kills them before reaching disk. On restart, disk still has defaults → every subsequent GET returns defaults.
+- **B:** Disk writes fail silently due to volume/permissions. HTTP 500 is sent to client but client swallows it. Data only ever lives in the process write queue until next crash.
+- **C:** A periodic `git pull`/deployment script resets `data/widgets.json` to git-tracked defaults (it is currently tracked in git with fixed content).
+
+Additional code-level bug found: `persistWidgets({ sync: false })` during `init()` stamps default widgets with `new Date().toISOString()` when `_widgetsUpdatedAt` is null (fresh private tab). This makes the client-side defaults appear "newer" than the server payload in `_reconcilePayloadLocally`, so real server data is discarded and the fresh-tab user sees defaults.
+
+### Assignment issued
+
+- **File:** `team/assignments-reset-fix.md`
+- **Track priority:** P0 — production data-loss bug.
+
+### Delegation summary
+
+| Owner | Focus | Primary files |
+|-------|-------|---------------|
+| **Backend Dev** | Diagnostic logging (WIDGETS_PATH, write success/fail, GET/PUT path) + remove `data/widgets.json` from git tracking | `api/server.js`, `.gitignore` |
+| **Frontend Dev** | Diagnostic logging (PUT failure, reconcile decision, init localTs) + fix timestamp-stamping of defaults during init | `js/app.js`, `js/store.js` |
+| **QA** | After both land: start Docker stack, verify git-ignore, browser smoke test with 90-second wait + second private window, check Docker logs | N/A (verdict only) |
+
+### Execution status (2026-05-13)
+
+- [ ] Backend Dev: diagnostic logging + gitignore fix
+- [ ] Frontend Dev: diagnostic logging + init timestamp fix
+- [ ] QA: structured Pass/Fail verdict
+
+---
+
 ## Client direction ? Server sync gate by reload (2026-05-13)
 
 ### Manager summary
