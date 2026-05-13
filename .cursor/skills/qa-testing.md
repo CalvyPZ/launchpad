@@ -44,7 +44,7 @@ Use this skill when performing QA validation, running acceptance checks, or veri
 ## How to test manually
 
 1. Start the app: `sudo docker compose up -d` (or use nginx directly)
-2. Open `http://localhost:8033` in Chrome
+2. Open `https://web.calvy.com.au` in Chrome for HTTPS/PWA verification. If HTTPS is blocked, use LAN `http://192.168.1.245:8033` as the local fallback.
 3. Use DevTools for:
    - Console: check for JS errors
    - Application tab: inspect localStorage (`calvybots_*` keys), manifest, service worker

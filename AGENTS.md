@@ -29,6 +29,8 @@ The app runs on Docker Compose at port 8033, typically behind a Cloudflare tunne
 
 **LAN dashboard URL (client):** http://192.168.1.245:8033 — use for browser QA and MCP browser checks when the stack is up on the home network.
 
+**Primary HTTPS QA URL:** https://web.calvy.com.au — use this as the first choice for interactive HTTPS, PWA, and console validation.
+
 ### Starting the production Docker stack
 
 ```bash

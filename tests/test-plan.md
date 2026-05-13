@@ -33,6 +33,7 @@ Validate the CalvyBots dashboard as a static web app delivered by nginx with no 
 - Static server
   - nginx serving repo root as document root.
   - `index.html` available at `/` and `/index.html`.
+- Production HTTPS QA target: `https://web.calvy.com.au` (primary for interactive HTTPS, PWA, and console checks), with LAN fallback `http://192.168.1.245:8033` when local stack debugging is needed.
   - Content-Type checks for html/js/css/json/assets.
 - Test data conditions
   - Clean browser profile (cache and storage cleared).

@@ -2,6 +2,46 @@
 
 Date: 2026-05-13
 
+### Client direction ? HTTPS validation baseline (2026-05-13)
+
+**Status:** Added to active delegation constraints for all verification tracks.
+
+**Requirement:** All QA and verification of interactive browser behavior should treat `https://web.calvy.com.au` as the primary target (Cloudflare-fronted production deployment) for HTTPS/PWA/console checks.
+
+**Execution rule:** Prefer `https://web.calvy.com.au` whenever HTTPS access is available; use LAN `http://192.168.1.245:8033` only as a fallback for local debugging when HTTPS validation is blocked.
+
+**Owner note:** Frontend, Backend, and QA should include this constraint in next validation handoffs and environment setup docs.
+
+### Client direction ? Add Widget picker click path (2026-05-13, P1)
+
+**Status:** Open bug reported by client. Fix is being dispatched.
+
+**Priority:** P1 ? blocks widget creation in edit mode.
+
+**User-reported failure:** In edit mode, the Add Widget dropdown opens, but selecting a widget option does not add a widget and the menu remains open.
+
+**Scope hypothesis:** Click handling is likely being blocked or short-circuited by overlay/pointer-events/z-index or `x-on` propagation interaction between `index.html` picker markup and `js/app.js`.
+
+**Team Lead assignment:** Frontend Dev to investigate and fix.
+- **Files to investigate:** `index.html`, `js/app.js`, `css/style.css` (overlay and pointer events), `team/style-guide.md` (only if visible behavior/pattern changes).
+- **Acceptance criteria:**
+  - Selecting a picker option adds the expected widget immediately.
+  - Picker closes after selection.
+  - Existing edit-mode controls remain accessible without accidental click interception.
+  - Keyboard flow remains functional if a keyboard path is implemented in the component.
+
+### Client direction ? Add Widget picker fix execution (2026-05-13)
+
+- **Frontend remediation complete (`js/app.js`):** `activateAddWidgetOption` now closes picker only on successful `addWidget` execution, and `addWidget` now returns explicit success/failure and safely imports `migrateLegacyIfNeeded` from `js/store.js` (runtime exception guard).
+- **QA status:** pending interactive verification.
+
+### Client direction ? Add Widget picker QA result (2026-05-13)
+
+- **QA verdict:** Pass with notes (`qa-engineer`).
+- **What was verified:** mouse add flow (second Todo in edit mode), picker close behavior, keyboard activation path, outside-click close, and surrounding edit-mode control accessibility.
+- **Finding:** low-severity environmental note only?`PUT /api/widgets` returned 500 in logs during some test paths, but add-picker interaction itself remains functional.
+- **Next action for Team Lead:** monitor API/save health for environment stability; no picker regression remains open.
+
 Status: **Client direction recorded ??? PWA with online-first behavior**
 
 ## Manager ??? client decision (record for delegation)
@@ -432,3 +472,37 @@ Execute **`team/assignments-widget-sync-interval-flush.md`**; Frontend lands fir
 - **Notes severity (Low, documented behavior):** `sendBeacon` queue semantics; **offline** tab-close cannot sync to server (**expected**). No remediation task unless product asks for different semantics.
 
 **Cycle status:** **Signed off** for Team Lead tracking; optional human smoke + any client demo rehearsal remain operational follow-ups, not open dev items for this track.
+
+## Client direction ? Server sync gate by reload (2026-05-13)
+
+### Manager summary
+
+- User requires **remote payload ingest only on cold load**, preventing accidental in-session overwrite of local edits.
+- New behavior target:
+  - Keep outbound sync path (`PUT`/beacon/pagehide) unchanged unless explicitly retired later.
+  - No remote `_applyPendingRemotePayload` or reconcile in poll/focus/online flows after initial load.
+  - Cold load continues to use `compareUpdatedAt` and `_widgetsUpdatedAt` to choose authoritative source.
+
+### Team Lead assignment
+
+- **Owner:** Frontend Dev
+- **Primary file:** `js/app.js`
+- **Acceptance criteria:**
+  - `reconcileServerWidgets()` is only applied during initial bootstrap path.
+  - Poller, `visibilitychange` handler, and `online` handler no longer ingest fresh `/api/widgets` data into the active session.
+  - `_cachePendingRemotePayload` / `_applyPendingRemotePayload` cannot trigger mid-session state changes.
+  - `init()` cold-load merge still enforces latest-edit-wins using `updatedAt` between localStorage and server payload.
+  - In-session PUT flow remains active (debounced persist + interval flush + page unload handling).
+- **Definition of done:**
+  - A user must reload the page to see remote widget/dashboard changes.
+  - In-session local edits are not overwritten by background polling/focus/online events.
+  - Full reload still converges the local snapshot and server snapshot using timestamp policy.
+
+### Execution status (2026-05-13)
+
+- **Frontend Dev complete (`frontend-senior-dev`)**:
+  - Implemented in `js/app.js` with bootstrap-only inbound sync (`reconcileServerWidgets` now active for init only), no mid-session poll/visibility/online remote apply, and pending remote payload queue locked to bootstrap completion.
+  - Outbound save/debounced PUT/pagehide-path preserved.
+- **QA:** `qa-engineer` returned **Pass with notes** for this track.
+  - Acceptance criteria above are satisfied with evidence in `js/app.js` and no high/medium-severity blockers found.
+  - Recommendation: close cycle from Team Lead perspective after optional manual proof (reload gate + cross-tab overwrite scenario).

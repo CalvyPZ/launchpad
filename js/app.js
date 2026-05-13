@@ -11,6 +11,7 @@ import {
   getWidgetPayloadForApi,
   loadWidgetPayloadFromApi,
   normaliseWidgetRows,
+  migrateLegacyIfNeeded,
 } from "./store.js";
 import * as clockWidget from "./widgets/clock.js";
 import * as notesWidget from "./widgets/notes.js";
@@ -179,6 +180,8 @@ document.addEventListener("alpine:init", () => {
     _widgetsUpdatedAt: null,
     _widgetsPollTimer: null,
     _widgetsPendingRemotePayload: null,
+    _initialServerSyncDone: false,
+    _initialServerSyncInFlight: false,
     widgetMapEl: null,
     toolsGridEl: null,
     _pendingWidgetFocusId: null,
@@ -219,8 +222,6 @@ document.addEventListener("alpine:init", () => {
           this._armWidgetsSyncPushTimer();
           return;
         }
-        void this.reconcileServerWidgets("online");
-        this._applyPendingRemotePayload();
         this._armWidgetsSyncPoller();
         this._armWidgetsSyncPushTimer();
       };
@@ -263,8 +264,6 @@ document.addEventListener("alpine:init", () => {
             this._armWidgetsSyncPushTimer();
             return;
           }
-          this._applyPendingRemotePayload();
-          void this.reconcileServerWidgets("visible");
           this._armTodoResetTicker();
           this._armWidgetsSyncPoller();
           this._armWidgetsSyncPushTimer();
@@ -322,6 +321,10 @@ document.addEventListener("alpine:init", () => {
 
     _applyPendingRemotePayload() {
       if (!this._widgetsPendingRemotePayload) return;
+      if (this._initialServerSyncDone) {
+        this._widgetsPendingRemotePayload = null;
+        return;
+      }
       if (this._widgetsNeedSync || this._widgetsSyncInFlight || this._isWidgetEditSessionActive()) return;
       const payload = this._widgetsPendingRemotePayload;
       this._widgetsPendingRemotePayload = null;
@@ -431,18 +434,26 @@ document.addEventListener("alpine:init", () => {
         return;
       }
       this._isExiting = true;
+      const hadPendingOutboundSync =
+        Boolean(this._widgetsNeedSync) || this._widgetsSyncTimer != null;
       if (this._widgetsSyncTimer != null) {
         window.clearTimeout(this._widgetsSyncTimer);
         this._widgetsSyncTimer = null;
       }
       this._disarmWidgetsSyncPoller();
       this._disarmWidgetsSyncPushTimer();
-      this._widgetsNeedSync = true;
       this._widgetsUpdatedAt = saveWidgets(this.widgets, {
         updatedAt: this._widgetsUpdatedAt || new Date().toISOString(),
       });
       saveToolsWidgets(this.toolsWidgets);
+      /* Keep outbound queue real: persistWidgetsDeferredSync sets this when the user/tooling dirties state,
+         or a debounced PUT is still scheduled. Never force-sync on exit — forcing sync while the initial
+         GET reconcile is still in flight can PUT default/tentative rows and wipe the server's last good blob. */
+      this._widgetsNeedSync = hadPendingOutboundSync;
       if (!this.online) {
+        return;
+      }
+      if (!this._initialServerSyncDone && !hadPendingOutboundSync) {
         return;
       }
       void this.syncToServer({ keepalive: true, source: _reason });
@@ -519,11 +530,19 @@ document.addEventListener("alpine:init", () => {
     },
 
     async reconcileServerWidgets(trigger = "init") {
-      if (!this.online) {
+      if (trigger !== "init") {
         return;
       }
+      if (this._initialServerSyncDone || this._initialServerSyncInFlight) {
+        return;
+      }
+      this._initialServerSyncInFlight = true;
 
       try {
+        if (!this.online) {
+          return;
+        }
+
         const response = await fetch(WIDGETS_API_URL, {
           method: "GET",
           headers: { "Accept": "application/json" },
@@ -548,6 +567,10 @@ document.addEventListener("alpine:init", () => {
         if (trigger !== "visible") {
           console.error("Widget sync fetch failed", error);
         }
+      } finally {
+        this._initialServerSyncDone = true;
+        this._initialServerSyncInFlight = false;
+        this._widgetsPendingRemotePayload = null;
       }
     },
 
@@ -991,8 +1014,10 @@ document.addEventListener("alpine:init", () => {
       if (!Number.isInteger(selectedIndex)) return;
       const selected = options[selectedIndex];
       if (!selected) return;
-      this.addWidget(selected.type, false);
-      this.closeAddWidgetPicker(true);
+      const didAdd = this.addWidget(selected.type, false);
+      if (didAdd) {
+        this.closeAddWidgetPicker(true);
+      }
       this.addWidgetPickerIndex = selectedIndex;
     },
 
@@ -1247,9 +1272,10 @@ document.addEventListener("alpine:init", () => {
     },
 
     addWidget(type, returnFocus = true) {
-      if (!this.editMode) return;
+      if (!this.editMode) return false;
+      let added = false;
       if (this.currentPage === "tools") {
-        if (!toolsWidgetTypeSet.has(type)) return;
+        if (!toolsWidgetTypeSet.has(type)) return false;
         const nextPosition = this.toolsWidgets.length;
         const next = {
           id: makeWidgetId(type),
@@ -1265,8 +1291,9 @@ document.addEventListener("alpine:init", () => {
         this.toolsWidgets = [...this.toolsWidgets, next];
         this.persistToolsWidgets();
         this.renderPageWidgets("tools");
+        added = true;
       } else {
-        if (!widgetTypeSet.has(type)) return;
+        if (!widgetTypeSet.has(type)) return false;
         const nextPosition = this.widgets.length;
         const next = {
           id: makeWidgetId(type),
@@ -1284,12 +1311,16 @@ document.addEventListener("alpine:init", () => {
         this.widgets = migrateLegacyIfNeeded([...this.widgets, next]);
         this.persistWidgets();
         this.renderPageWidgets("home");
+        added = true;
       }
+      if (!added) return false;
+
       this.addWidgetOpen = false;
       this.addWidgetPickerIndex = -1;
       if (returnFocus && this.$refs?.addWidgetButton?.focus) {
         this.$refs.addWidgetButton.focus();
       }
+      return true;
     },
 
     removeWidget(widgetId, pageKey) {
