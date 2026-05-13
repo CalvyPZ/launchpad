@@ -450,7 +450,13 @@ export function loadWidgetsDocument() {
 
 export function saveWidgets(widgets, options = {}) {
   const payload = normaliseWidgetRows(widgets || []);
-  const updatedAt = parseUpdatedAt(options.updatedAt) || new Date().toISOString();
+  // When the caller explicitly passes updatedAt (even as null), preserve it so that
+  // a fresh-tab init write does not fabricate a "now" timestamp that would make
+  // default widgets appear newer than real server data during reconcile.
+  // When no updatedAt key is present in options at all, fall back to now as before.
+  const updatedAt = 'updatedAt' in options
+    ? (parseUpdatedAt(options.updatedAt) || null)
+    : new Date().toISOString();
   localStorage.setItem(
     WIDGETS_KEY,
     JSON.stringify({

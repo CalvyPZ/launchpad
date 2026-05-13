@@ -205,7 +205,9 @@ document.addEventListener("alpine:init", () => {
       saveToolsWidgets(this.toolsWidgets);
       const shouldSync = options.sync !== false;
       if (!shouldSync) {
-        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
+        // Same null-preservation rule as persistWidgets: don't fabricate a timestamp
+        // when _widgetsUpdatedAt is null, to avoid making defaults look newer than server data.
+        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt });
         return;
       }
       this.persistWidgetsDeferredSync();
@@ -245,6 +247,7 @@ document.addEventListener("alpine:init", () => {
       const localDocument = loadWidgetsDocument();
       this.widgets = localDocument.widgets;
       this._widgetsUpdatedAt = localDocument.updatedAt;
+      console.log('[launchpad] init: localDocument.updatedAt =', this._widgetsUpdatedAt);
 
       this.toolsWidgets = loadToolsWidgets();
       this._visibilityHandler = () => {
@@ -464,7 +467,10 @@ document.addEventListener("alpine:init", () => {
       if (doSync) {
         return this.persistWidgetsDeferredSync();
       }
-      saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt || new Date().toISOString() });
+      // Do not fabricate a timestamp when none exists — passing null lets saveWidgets
+      // store null, so reconcilePayloadLocally correctly treats local as "no timestamp"
+      // and will apply newer server data rather than treating defaults as authoritative.
+      saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt });
     },
 
     _reconcilePayloadLocally(payload, trigger = "poll") {
@@ -487,6 +493,8 @@ document.addEventListener("alpine:init", () => {
         !hasRemoteTs && !hasLocalTs ? true
           : hasRemoteTs && hasLocalTs ? compare > 0
             : hasRemoteTs && !hasLocalTs;
+
+      console.log('[launchpad] reconcile(' + trigger + '): remoteTs =', payload.updatedAt, 'localTs =', localTs, 'remoteLooksNewer =', remoteLooksNewer);
 
       if ((this._widgetsNeedSync || this._isWidgetEditSessionActive()) && remoteLooksNewer) {
         this._cachePendingRemotePayload(payload);
@@ -634,6 +642,7 @@ document.addEventListener("alpine:init", () => {
           throw error;
         }
         if (!response.ok) {
+          console.error('[launchpad] PUT /api/widgets FAILED — status:', response.status);
           throw new Error(`PUT ${WIDGETS_API_URL} failed: ${response.status}`);
         }
 
