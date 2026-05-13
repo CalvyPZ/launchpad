@@ -602,7 +602,7 @@ document.addEventListener("alpine:init", () => {
       this._disarmWidgetsSyncPoller();
       this._disarmWidgetsSyncPushTimer();
       this._widgetsUpdatedAt = saveWidgets(this.widgets, {
-        updatedAt: this._widgetsUpdatedAt || new Date().toISOString(),
+        updatedAt: this._widgetsUpdatedAt,
       });
       saveToolsWidgets(this.toolsWidgets);
       /* Keep outbound queue real: persistWidgetsDeferredSync sets this when the user/tooling dirties state,
