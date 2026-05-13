@@ -83,6 +83,7 @@ document.addEventListener("alpine:init", () => {
       dropTargetWidgetId: null,
       dropIndex: null,
       gridEl: null,
+      pointerMoveHandler: null,
     };
   const format = nowClockText();
 
@@ -326,7 +327,6 @@ document.addEventListener("alpine:init", () => {
 
         if (this.editMode) {
           dragHandle.addEventListener("pointerdown", this.onWidgetPointerDown.bind(this), { passive: false });
-          dragHandle.addEventListener("pointermove", this.onWidgetPointerMove.bind(this), { passive: false });
           dragHandle.addEventListener("pointerup", this.onWidgetPointerUp.bind(this));
           dragHandle.addEventListener("pointercancel", this.onWidgetPointerCancel.bind(this));
           dragHandle.addEventListener("lostpointercapture", this.onWidgetLostPointerCapture.bind(this));
@@ -406,6 +406,8 @@ document.addEventListener("alpine:init", () => {
       if (typeof handle.setPointerCapture === "function") {
         handle.setPointerCapture(event.pointerId);
       }
+      widgetDragState.pointerMoveHandler = this.onWidgetPointerMove.bind(this);
+      document.addEventListener("pointermove", widgetDragState.pointerMoveHandler, { passive: false });
 
       const rect = shell.getBoundingClientRect();
       const ghost = shell.cloneNode(true);
@@ -638,12 +640,10 @@ document.addEventListener("alpine:init", () => {
     },
 
     onWidgetPointerMove(event) {
+      event.preventDefault();
       const widgetMap = widgetDragState.gridEl;
       if (!widgetMap) return;
       if (!widgetDragState.active || event.pointerId !== widgetDragState.pointerId || !widgetDragState.ghost) return;
-      if (event.pointerType === "touch") {
-        event.preventDefault();
-      }
 
       const rect = widgetDragState.sourceRect;
       if (!rect) return;
@@ -687,6 +687,10 @@ document.addEventListener("alpine:init", () => {
     },
 
     onWidgetPointerUp(event) {
+      if (widgetDragState.pointerMoveHandler) {
+        document.removeEventListener("pointermove", widgetDragState.pointerMoveHandler);
+        widgetDragState.pointerMoveHandler = null;
+      }
       if (!widgetDragState.active || event.pointerId !== widgetDragState.pointerId) return;
 
       const sourceWidgetId = widgetDragState.sourceWidgetId;
@@ -736,10 +740,18 @@ document.addEventListener("alpine:init", () => {
     },
 
     onWidgetPointerCancel() {
+      if (widgetDragState.pointerMoveHandler) {
+        document.removeEventListener("pointermove", widgetDragState.pointerMoveHandler);
+        widgetDragState.pointerMoveHandler = null;
+      }
       this.onWidgetDragEnd(false, true);
     },
 
     onWidgetLostPointerCapture() {
+      if (widgetDragState.pointerMoveHandler) {
+        document.removeEventListener("pointermove", widgetDragState.pointerMoveHandler);
+        widgetDragState.pointerMoveHandler = null;
+      }
       if (!widgetDragState.active) return;
       this.onWidgetDragEnd(false, true);
     },
@@ -796,6 +808,10 @@ document.addEventListener("alpine:init", () => {
       document.body.classList.remove("dnd-active");
       if (widgetMap) {
         Array.from(widgetMap.querySelectorAll(".dash-widget")).forEach((widget) => widget.classList.remove("dnd-over"));
+      }
+      if (widgetDragState.pointerMoveHandler) {
+        document.removeEventListener("pointermove", widgetDragState.pointerMoveHandler);
+        widgetDragState.pointerMoveHandler = null;
       }
     },
 

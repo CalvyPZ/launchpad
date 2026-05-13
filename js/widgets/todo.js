@@ -111,6 +111,7 @@ export function render(container, context) {
     pointerOffsetX: 0,
     pointerOffsetY: 0,
     sourceRect: null,
+      pointerMoveHandler: null,
   };
 
   container.className = "h-full todo-widget-root";
@@ -412,6 +413,8 @@ export function render(container, context) {
     if (typeof handle.setPointerCapture === "function") {
       handle.setPointerCapture(event.pointerId);
     }
+    taskDragState.pointerMoveHandler = onTaskPointerMove;
+    document.addEventListener("pointermove", taskDragState.pointerMoveHandler, { passive: false });
     const sourceList = taskElement.closest(".todo-list");
     const rect = taskElement.getBoundingClientRect();
     const ghost = taskElement.cloneNode(true);
@@ -442,10 +445,8 @@ export function render(container, context) {
   };
 
   const onTaskPointerMove = (event) => {
+    event.preventDefault();
     if (!taskDragState.active || event.pointerId !== taskDragState.pointerId || !taskDragState.ghost || !taskDragState.sourceRect) return;
-    if (event.pointerType === "touch") {
-      event.preventDefault();
-    }
     const rect = taskDragState.sourceRect;
     const dx = event.clientX - taskDragState.pointerOffsetX - rect.left;
     const dy = event.clientY - taskDragState.pointerOffsetY - rect.top;
@@ -481,6 +482,10 @@ export function render(container, context) {
   };
 
   const onTaskPointerUp = (event) => {
+    if (taskDragState.pointerMoveHandler) {
+      document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
+      taskDragState.pointerMoveHandler = null;
+    }
     if (!taskDragState.active || event.pointerId !== taskDragState.pointerId) return;
     const payload = makeTaskPayload(taskDragState.sourceWidgetId, taskDragState.sourceTaskId);
     const destinationWidgetId = taskDragState.destinationList?.dataset?.widgetId;
@@ -493,10 +498,18 @@ export function render(container, context) {
   };
 
   const onTaskPointerCancel = () => {
+    if (taskDragState.pointerMoveHandler) {
+      document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
+      taskDragState.pointerMoveHandler = null;
+    }
     onTaskDragEnd(false);
   };
 
   const onTaskLostPointerCapture = () => {
+    if (taskDragState.pointerMoveHandler) {
+      document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
+      taskDragState.pointerMoveHandler = null;
+    }
     onTaskDragEnd(false);
   };
 
@@ -519,6 +532,10 @@ export function render(container, context) {
     taskDragState.pointerOffsetX = 0;
     taskDragState.pointerOffsetY = 0;
     taskDragState.sourceRect = null;
+    if (taskDragState.pointerMoveHandler) {
+      document.removeEventListener("pointermove", taskDragState.pointerMoveHandler);
+      taskDragState.pointerMoveHandler = null;
+    }
     if (!shouldMutate) return;
   };
 
@@ -724,7 +741,6 @@ export function render(container, context) {
       const taskHandle = taskElement.querySelector(".todo-item-handle");
       if (taskHandle) {
         taskHandle.addEventListener("pointerdown", onTaskPointerDown, { passive: false });
-        taskHandle.addEventListener("pointermove", onTaskPointerMove, { passive: false });
         taskHandle.addEventListener("pointerup", onTaskPointerUp);
         taskHandle.addEventListener("pointercancel", onTaskPointerCancel);
         taskHandle.addEventListener("lostpointercapture", onTaskLostPointerCapture);
