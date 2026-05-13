@@ -1,0 +1,30 @@
+---
+description: Mandatory workflow chain — exploration, Team Lead delegation, implementation, QA, then Team Lead cycle until done.
+alwaysApply: true
+---
+
+# Chain of Command — User Work and Agent Roles
+
+All substantive user requests follow this sequence. Do not skip stages or merge roles in one turn unless the user explicitly asks for a narrow exception (for example, a one-line typo fix).
+
+## Flow
+
+1. **Initial exploration (readonly)** — Clarify scope, locate relevant files, and summarize constraints. No implementation yet unless the request is trivial and clearly isolated.
+2. **Team Lead (`team-lead`)** — After exploration, route outcomes to the Team Lead. The Team Lead breaks work into owned tasks, updates or references `team/lead-status.md` / delegation artifacts as appropriate, and assigns Frontend, Backend, or QA via the usual delegation rules in `workflow-and-process.mdc`.
+3. **Implementation** — Frontend or Backend agents (or the main agent acting in that role) execute only what the Team Lead delegated. Respect file ownership in `.cursorrules`.
+4. **QA (`qa-engineer`)** — When delegated implementation is done, run QA: structured verdict (Pass / Pass with notes / Blocked or Fail), findings with severity and evidence, sign-off recommendation. Update `team/qa-*.md` only when the user asked for repo updates.
+5. **Return to manager (Team Lead)** — Deliver the QA summary to the Team Lead. The Team Lead decides the next cycle: merge, reopen tasks, or re-delegate until the feature meets acceptance.
+
+## Rules
+
+- **No end-around:** Do not ship feature code from “exploration only” without Team Lead delegation for that slice of work.
+- **One hat at a time:** In a single response, prefer one primary role; if you must summarize for the next role, state the handoff explicitly.
+- **Cycle until complete:** A single QA Pass does not close the initiative until the Team Lead confirms scope is satisfied against client direction and `team/delegation-v4.md` / `team/brief.md` as applicable.
+
+## Example handoff (chat)
+
+After exploration: “Handing to Team Lead: [2–3 bullets]. Request: delegate implementation and acceptance criteria.”
+
+After implementation: “Handing to QA: [what changed, paths]. Request: verdict + sign-off recommendation for Team Lead.”
+
+After QA: “Handing to Team Lead: [verdict summary]. Request: close cycle or assign follow-ups.”
