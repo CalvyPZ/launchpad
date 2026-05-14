@@ -12,9 +12,11 @@ import {
   defaultFortnightState,
   evaluateAllTodoResets,
   getWidgetPayloadForApi,
+  getWidgetPayloadFingerprint,
   loadWidgetPayloadFromApi,
   normaliseWidgetRows,
   normaliseToolsRows,
+  normaliseToolsLandingRows,
   migrateLegacyIfNeeded,
 } from "./store.js";
 import * as notesWidget from "./widgets/notes.js";
@@ -37,6 +39,8 @@ const widgetFactories = {
 };
 const widgetTypeSet = new Set(widgetTypes);
 const WIDGETS_API_URL = "/api/widgets";
+/** POST body `{ revision }` â€” Backend must expose this route for first-open outbound writes. */
+const WIDGETS_ACK_URL = "/api/widgets/ack";
 const WIDGET_SYNC_DEBOUNCE_MS = 350;
 const WIDGET_SYNC_POLL_MS = 4000;
 const WIDGET_SYNC_PUSH_MS = 3000;
@@ -52,6 +56,74 @@ function compareUpdatedAt(leftTs, rightTs) {
   return 0;
 }
 
+/** Reads server revision primitive from GET/PUT JSON or `ETag` (when Backend sends one). */
+function extractServerRevisionFromWidgetsResponse(rawJson, etagHeader) {
+  if (rawJson && typeof rawJson.revision === "string" && rawJson.revision.trim()) {
+    return rawJson.revision.trim();
+  }
+  if (rawJson && typeof rawJson.revision === "number" && Number.isFinite(rawJson.revision)) {
+    return String(rawJson.revision);
+  }
+  const tag = typeof etagHeader === "string" ? etagHeader.trim() : "";
+  if (!tag) return null;
+  const weak = tag.replace(/^W\//i, "");
+  return weak.replace(/^"+|"+$/g, "");
+}
+
+function normaliseRevisionToken(value) {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^"+|"+$/g, "");
+}
+
+function parseSyncFailureBodyDetail(responseText) {
+  if (typeof responseText !== "string") return "";
+  const raw = responseText.trim();
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === "string") return parsed.trim();
+    if (parsed && typeof parsed === "object") {
+      const parts = [];
+      if (typeof parsed.detail === "string" && parsed.detail.trim()) parts.push(parsed.detail.trim());
+      if (typeof parsed.message === "string" && parsed.message.trim()) parts.push(parsed.message.trim());
+      if (typeof parsed.error === "string" && parsed.error.trim()) parts.push(parsed.error.trim());
+      if (Array.isArray(parsed.errors)) {
+        const flatErrors = parsed.errors
+          .map((item) => {
+            if (typeof item === "string") return item.trim();
+            if (item && typeof item.message === "string") return item.message.trim();
+            return "";
+          })
+          .filter(Boolean);
+        if (flatErrors.length) parts.push(flatErrors.join("; "));
+      }
+      if (parts.length) return parts.join(" â€” ");
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    return raw;
+  }
+  return raw;
+}
+
+function parseJsonSafe(rawText) {
+  if (typeof rawText !== "string" || !rawText.trim()) return null;
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return null;
+  }
+}
+
+function makeSyncFailureErrorMessage(response, responseText) {
+  const statusText = response.statusText ? ` ${response.statusText}` : "";
+  const bodyDetail = parseSyncFailureBodyDetail(responseText).slice(0, 360);
+  const detail = bodyDetail ? ` â€” ${bodyDetail}` : "";
+  return `PUT ${WIDGETS_API_URL} failed: ${response.status}${statusText}${detail}`;
+}
+
 function pickServerPayload(raw) {
   if (!raw) return null;
   if (Array.isArray(raw)) {
@@ -60,8 +132,15 @@ function pickServerPayload(raw) {
       updatedAt: null,
       widgets: normaliseWidgetRows(raw),
       toolsWidgets: null,
+      toolsLandingWidgets: null,
     };
   }
+  const resolveLanding = (r) =>
+    Array.isArray(r.toolsLandingWidgets)
+      ? normaliseToolsLandingRows(r.toolsLandingWidgets)
+      : Array.isArray(r.data?.toolsLandingWidgets)
+      ? normaliseToolsLandingRows(r.data.toolsLandingWidgets)
+      : null;
   if (Array.isArray(raw.widgets)) {
     return {
       version: raw.version || 1,
@@ -72,6 +151,7 @@ function pickServerPayload(raw) {
         : Array.isArray(raw.data?.toolsWidgets)
         ? normaliseToolsRows(raw.data.toolsWidgets)
         : null,
+      toolsLandingWidgets: resolveLanding(raw),
     };
   }
   if (Array.isArray(raw.data?.widgets)) {
@@ -84,6 +164,7 @@ function pickServerPayload(raw) {
         : Array.isArray(raw.data?.toolsWidgets)
         ? normaliseToolsRows(raw.data.toolsWidgets)
         : null,
+      toolsLandingWidgets: resolveLanding(raw),
     };
   }
   if (Array.isArray(raw.toolsWidgets)) {
@@ -92,6 +173,7 @@ function pickServerPayload(raw) {
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
       widgets: null,
       toolsWidgets: normaliseToolsRows(raw.toolsWidgets),
+      toolsLandingWidgets: resolveLanding(raw),
     };
   }
   if (Array.isArray(raw.data?.toolsWidgets)) {
@@ -100,14 +182,24 @@ function pickServerPayload(raw) {
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
       widgets: null,
       toolsWidgets: normaliseToolsRows(raw.data.toolsWidgets),
+      toolsLandingWidgets: resolveLanding(raw),
+    };
+  }
+  if (Array.isArray(raw.toolsLandingWidgets) || Array.isArray(raw.data?.toolsLandingWidgets)) {
+    return {
+      version: raw.version || 1,
+      updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+      widgets: null,
+      toolsWidgets: null,
+      toolsLandingWidgets: resolveLanding(raw),
     };
   }
   return null;
 }
 
 const addWidgetChoices = [
-  { type: "notes", label: "Sticky Notes", icon: "📝" },
-  { type: "todo", label: "To-Do", icon: "✅" },
+  { type: "notes", label: "Sticky Notes", icon: "ðŸ“" },
+  { type: "todo", label: "To-Do", icon: "âœ…" },
 ];
 
 const toolsWidgetFactories = {
@@ -119,13 +211,13 @@ const toolsWidgetFactories = {
 /** Types the user may add from the Tools tab picker. */
 const toolsTabAddableTypeSet = new Set(["fortnight"]);
 const toolsTabAddWidgetChoices = [
-  { type: "fortnight", label: "Fortnight calculator", icon: "📆" },
+  { type: "fortnight", label: "Fortnight calculator", icon: "ðŸ“†" },
 ];
 /** Types the user may add from the Debug tab picker (diagnostics only). */
 const debugAddableTypeSet = new Set(["status-tools", "log-tools"]);
 const debugAddWidgetChoices = [
-  { type: "status-tools", label: "Status", icon: "📡" },
-  { type: "log-tools", label: "Log", icon: "📋" },
+  { type: "status-tools", label: "Status", icon: "ðŸ“¡" },
+  { type: "log-tools", label: "Log", icon: "ðŸ“‹" },
 ];
 
 const widgetLabels = {
@@ -224,8 +316,15 @@ document.addEventListener("alpine:init", () => {
     _widgetsUpdatedAt: null,
     _widgetsPollTimer: null,
     _widgetsPendingRemotePayload: null,
-    _initialServerSyncDone: false,
-    _initialServerSyncInFlight: false,
+    _widgetsBootstrapInFlight: false,
+    /** When true, PUT / POST beacon / debounced sync may run (first-open GET+apply+ack completed, or equivalent after import). */
+    _widgetsWriteGateOpen: false,
+    /** Fingerprint of last server-aligned widget content (see getWidgetPayloadFingerprint). */
+    _widgetsBaselineFingerprint: "",
+    /** Server revision last acknowledged or returned on successful PUT (sent as `expectRevision` / `If-Match`). */
+    _widgetsAckRevision: null,
+    _widgetsAckError: null,
+    _widgetsQueuedSyncAfterAck: false,
     widgetMapEl: null,
     toolsGridEl: null,
     debugGridEl: null,
@@ -241,11 +340,26 @@ document.addEventListener("alpine:init", () => {
     _isExiting: false,
     forceShellRetrieveBusy: false,
     forceShellRetrieveError: null,
+    widgetDocumentExchangeError: null,
+    widgetExportBusy: false,
+    widgetImportBusy: false,
+
+    widgetDocExchangeControlsDisabled() {
+      return (
+        !this.online ||
+        this.widgetExportBusy ||
+        this.widgetImportBusy ||
+        this._widgetsSyncInFlight ||
+        this.forceShellRetrieveBusy ||
+        this._widgetsBootstrapInFlight
+      );
+    },
 
     navigateTo(page) {
       const next = pageKeys.has(page) ? page : "home";
       if (this.currentPage === "debug" && next !== "debug") {
         this.forceShellRetrieveError = null;
+        this.widgetDocumentExchangeError = null;
       }
       this.currentPage = next;
       this.closeAddWidgetPicker(false);
@@ -256,7 +370,7 @@ document.addEventListener("alpine:init", () => {
       if (this.forceShellRetrieveBusy) return;
       if (!this.online) {
         this.forceShellRetrieveError =
-          "You appear to be offline. Connect to the network first, then try again — clearing the shell cache while offline can prevent the app from loading.";
+          "You appear to be offline. Connect to the network first, then try again â€” clearing the shell cache while offline can prevent the app from loading.";
         return;
       }
       if (!("caches" in window) || typeof caches?.keys !== "function") {
@@ -277,6 +391,389 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
+    _applyServerDocumentForced(payload, outcomeMessage = "Server document applied") {
+      const remoteWidgets = Array.isArray(payload?.widgets) ? payload.widgets : null;
+      const remoteToolsWidgets = Array.isArray(payload?.toolsWidgets) ? payload.toolsWidgets : null;
+      const remoteToolsLandingWidgets = Array.isArray(payload?.toolsLandingWidgets)
+        ? payload.toolsLandingWidgets
+        : null;
+      if (!remoteWidgets) {
+        console.error("_applyServerDocumentForced: missing widgets[]", payload);
+        return false;
+      }
+      this.widgets = removeDeprecatedHomeWidgets(remoteWidgets);
+      this.toolsWidgets = remoteToolsWidgets != null ? remoteToolsWidgets : normaliseToolsRows(null);
+      this.toolsLandingWidgets =
+        remoteToolsLandingWidgets != null
+          ? remoteToolsLandingWidgets
+          : normaliseToolsLandingRows(null);
+      evaluateAllTodoResets(this.widgets);
+      evaluateAllTodoResets(this.toolsWidgets);
+      evaluateAllTodoResets(this.toolsLandingWidgets);
+      this._widgetsUpdatedAt =
+        typeof payload.updatedAt === "string" && payload.updatedAt.trim()
+          ? payload.updatedAt
+          : this._widgetsUpdatedAt;
+      this._widgetsNeedSync = false;
+      if (this._widgetsSyncTimer) {
+        window.clearTimeout(this._widgetsSyncTimer);
+        this._widgetsSyncTimer = null;
+        this._widgetsSyncDebounceStartedAt = null;
+      }
+      this.persistWidgets({ sync: false });
+      this.persistToolsWidgets({ sync: false });
+      this.persistToolsLandingWidgets({ sync: false });
+      this.renderPageWidgets("home");
+      this.renderPageWidgets("tools");
+      this.renderPageWidgets("debug");
+      this._widgetsLastSyncPushAt = new Date().toISOString();
+      this._setWidgetSyncPushOutcome("success", outcomeMessage);
+      reportWidgetSyncPushEvent("success", outcomeMessage, this);
+      reportWidgetSyncPushFromDashboard(this);
+      return true;
+    },
+
+    _syncBaselineToCurrent() {
+      this._widgetsBaselineFingerprint = getWidgetPayloadFingerprint(
+        this.widgets,
+        this.toolsWidgets,
+        this.toolsLandingWidgets
+      );
+    },
+
+    _flushQueuedSyncAfterGate() {
+      if (!this._widgetsWriteGateOpen) return;
+      const queued = this._widgetsQueuedSyncAfterAck;
+      this._widgetsQueuedSyncAfterAck = false;
+      if (!queued) return;
+      if (
+        getWidgetPayloadFingerprint(this.widgets, this.toolsWidgets, this.toolsLandingWidgets) !==
+        this._widgetsBaselineFingerprint
+      ) {
+        this.persistWidgetsDeferredSync();
+      }
+    },
+
+    async _postWidgetsAckRevision(revision) {
+      reportWidgetSyncRetrieve("ack_pending", revision ? String(revision) : "no revision in GET/PUT body");
+      const res = await fetch(WIDGETS_ACK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ revision: revision ?? null }),
+        cache: "no-store",
+      });
+      const txt = await res.text().catch(() => "");
+      if (res.status === 404 || res.status === 405) {
+        const detail = "POST /api/widgets/ack is not implemented on this API (required for first-open writes).";
+        reportWidgetSyncRetrieve("ack_error", detail);
+        const err = new Error("ACK_ENDPOINT_MISSING");
+        err.detail = detail;
+        throw err;
+      }
+      if (!res.ok) {
+        const detail = txt.trim().slice(0, 360) || `HTTP ${res.status}`;
+        reportWidgetSyncRetrieve("ack_error", detail);
+        throw new Error(detail);
+      }
+      reportWidgetSyncRetrieve("ack_success", revision ? `revision ${revision}` : "ack OK");
+    },
+
+    async _finalizeServerDocumentIngest(rawJson, response) {
+      const revision = extractServerRevisionFromWidgetsResponse(
+        rawJson,
+        response?.headers?.get?.("etag") || response?.headers?.get?.("ETag")
+      );
+      if (!revision) {
+        const msg = "No revision token was returned from /api/widgets response; write-gated sync is disabled.";
+        this._widgetsWriteGateOpen = false;
+        this._widgetsAckError = msg;
+        this._setWidgetSyncPushOutcome("skipped", msg);
+        reportWidgetSyncRetrieve("ack_error", msg);
+        throw new Error(msg);
+      }
+      this._widgetsAckError = null;
+      await this._postWidgetsAckRevision(revision);
+      this._widgetsWriteGateOpen = true;
+      this._widgetsAckRevision = revision;
+      this._syncBaselineToCurrent();
+      this._widgetsNeedSync = false;
+      if (this._widgetsSyncTimer) {
+        window.clearTimeout(this._widgetsSyncTimer);
+        this._widgetsSyncTimer = null;
+        this._widgetsSyncDebounceStartedAt = null;
+      }
+      this._flushQueuedSyncAfterGate();
+      reportWidgetSyncPushFromDashboard(this);
+    },
+
+    async _resolveWidgetRevisionForWrite() {
+      const cachedRevision = normaliseRevisionToken(this._widgetsAckRevision);
+      if (cachedRevision) return cachedRevision;
+
+      const response = await fetch(WIDGETS_API_URL, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const responseText = await response.text();
+      if (!response.ok) {
+        const detail = responseText.trim().slice(0, 280);
+        throw new Error(
+          `GET ${WIDGETS_API_URL} failed while resolving revision: ${response.status}${detail ? ` â€” ${detail}` : ""}`
+        );
+      }
+
+      const responseJson = parseJsonSafe(responseText);
+      const revision = extractServerRevisionFromWidgetsResponse(
+        responseJson,
+        response?.headers?.get?.("etag") || response?.headers?.get?.("ETag")
+      );
+      if (!revision) {
+        throw new Error(
+          "Server did not return a revision token. Export a fresh snapshot first, then retry import."
+        );
+      }
+
+      this._widgetsAckRevision = revision;
+      return revision;
+    },
+
+    async exportWidgetsDocumentFromServer() {
+      this.widgetDocumentExchangeError = null;
+      if (this.widgetExportBusy || this.widgetImportBusy) return;
+      if (!this.online) {
+        this.widgetDocumentExchangeError =
+          "You appear to be offline. Connect to the network before exporting the server snapshot.";
+        return;
+      }
+      this.widgetExportBusy = true;
+      try {
+        const response = await fetch(WIDGETS_API_URL, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          let detail = "";
+          try {
+            detail = (await response.text()).trim().slice(0, 280);
+          } catch {
+            detail = "";
+          }
+          throw new Error(
+            `GET ${WIDGETS_API_URL} failed: ${response.status}${detail ? ` â€” ${detail}` : ""}`
+          );
+        }
+        const rawText = await response.text();
+        let parsed;
+        try {
+          parsed = JSON.parse(rawText);
+        } catch (parseErr) {
+          console.error("exportWidgetsDocumentFromServer: invalid JSON", parseErr);
+          throw new Error("Server response was not valid JSON.");
+        }
+        const pretty = `${JSON.stringify(parsed, null, 2)}\n`;
+        const iso = new Date().toISOString().replace(/:/g, "-");
+        const blob = new Blob([pretty], { type: "application/json;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `launchpad-widgets-${iso}.json`;
+        anchor.rel = "noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("exportWidgetsDocumentFromServer", err);
+        this.widgetDocumentExchangeError =
+          err instanceof Error ? err.message : "Export failed. Check the network and API, then try again.";
+      } finally {
+        this.widgetExportBusy = false;
+      }
+    },
+
+    openWidgetImportFilePicker() {
+      this.widgetDocumentExchangeError = null;
+      if (!this.online) {
+        this.widgetDocumentExchangeError =
+          "You appear to be offline. Connect to the network before importing a server document.";
+        return;
+      }
+      if (this.widgetExportBusy || this.widgetImportBusy || this._widgetsSyncInFlight || this.forceShellRetrieveBusy || this._widgetsBootstrapInFlight) {
+        this.widgetDocumentExchangeError =
+          "Wait for the current operation (sync, export, import, or shell refresh) to finish, then try again.";
+        return;
+      }
+      const input = this.$refs?.widgetImportFileInput;
+      if (input && typeof input.click === "function") input.click();
+    },
+
+    async onWidgetImportFileSelected(event) {
+      this.widgetDocumentExchangeError = null;
+      const input = event?.target;
+      if (!(input instanceof HTMLInputElement)) return;
+      const file = input.files && input.files[0];
+      input.value = "";
+      if (!file) return;
+      if (!this.online) {
+        this.widgetDocumentExchangeError =
+          "You appear to be offline. Connect to the network before importing.";
+        return;
+      }
+      if (this.widgetImportBusy || this.widgetExportBusy || this._widgetsSyncInFlight || this._widgetsBootstrapInFlight) {
+        this.widgetDocumentExchangeError = "Wait for the current sync or export/import to finish, then try again.";
+        return;
+      }
+
+      let text;
+      try {
+        text = await file.text();
+      } catch (readErr) {
+        console.error("onWidgetImportFileSelected: read failed", readErr);
+        this.widgetDocumentExchangeError = "Could not read the selected file.";
+        return;
+      }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        console.error("onWidgetImportFileSelected: JSON.parse", parseErr);
+        this.widgetDocumentExchangeError = "File is not valid JSON.";
+        return;
+      }
+
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Array.isArray(parsed.widgets)) {
+        this.widgetDocumentExchangeError =
+          'Invalid document: top-level object with a "widgets" array is required (server export shape).';
+        return;
+      }
+
+      const confirmed = window.confirm(
+        "Overwrite the server widget document and replace this dashboardâ€™s cached Home, Tools, and Debug layouts with the selected file? Unsynced local-only edits will be lost. This cannot be undone."
+      );
+      if (!confirmed) return;
+
+      const apiOptions = {
+        toolsWidgets: parsed.toolsWidgets,
+        toolsLandingWidgets: parsed.toolsLandingWidgets,
+      };
+      if (typeof parsed.updatedAt === "string" && parsed.updatedAt.trim()) {
+        apiOptions.updatedAt = parsed.updatedAt;
+      }
+      let expectRevision;
+      try {
+        expectRevision = await this._resolveWidgetRevisionForWrite();
+      } catch (revisionErr) {
+        console.error("onWidgetImportFileSelected: revision resolution failed", revisionErr);
+        this.widgetDocumentExchangeError =
+          "Could not confirm server revision before import. Re-open the import action after a successful server sync or use Force retrieve, then retry.";
+        return;
+      }
+      const bodyPayload = getWidgetPayloadForApi(parsed.widgets, apiOptions);
+      bodyPayload.expectRevision = expectRevision;
+      const putHeaders = {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+      putHeaders["X-Calvybots-Widgets-Revision"] = expectRevision;
+      putHeaders["If-Match"] = `"${expectRevision}"`;
+
+      this.widgetImportBusy = true;
+      try {
+        const response = await fetch(WIDGETS_API_URL, {
+          method: "PUT",
+          headers: putHeaders,
+          body: JSON.stringify(bodyPayload),
+          cache: "no-store",
+        });
+        const responseText = await response.text();
+        const rawBody = parseJsonSafe(responseText);
+        if (!response.ok) {
+          if (response.status === 409) {
+            const responseCode = rawBody && typeof rawBody.code === "string" ? rawBody.code : "";
+            if (responseCode === "STALE_REVISION") {
+              const nextRevision = extractServerRevisionFromWidgetsResponse(
+                rawBody,
+                response?.headers?.get?.("etag") || response?.headers?.get?.("ETag")
+              );
+              if (nextRevision) {
+                this._widgetsAckRevision = nextRevision;
+              }
+              this.widgetDocumentExchangeError =
+                "Import was rejected due to a stale revision token. Refresh the document from server (or use Force retrieve) and retry with the latest snapshot.";
+              return;
+            }
+          }
+          const detail = responseText.trim().slice(0, 280);
+          throw new Error(
+            `PUT ${WIDGETS_API_URL} failed: ${response.status}${detail ? ` â€” ${detail}` : ""}`
+          );
+        }
+        const serverPayload = rawBody ? loadWidgetPayloadFromApi(rawBody) || pickServerPayload(rawBody) : null;
+        if (!serverPayload || !Array.isArray(serverPayload.widgets)) {
+          try {
+            const verify = await fetch(WIDGETS_API_URL, {
+              method: "GET",
+              headers: { Accept: "application/json" },
+              cache: "no-store",
+            });
+            if (verify.ok) {
+              const verifyRaw = await verify.json();
+              const verifyPayload =
+                loadWidgetPayloadFromApi(verifyRaw) || pickServerPayload(verifyRaw);
+              if (verifyPayload && Array.isArray(verifyPayload.widgets)) {
+                this._applyServerDocumentForced(verifyPayload, "Server document import applied");
+                try {
+                  await this._finalizeServerDocumentIngest(verifyRaw, verify);
+                  this.widgetDocumentExchangeError = null;
+                } catch (ackErr) {
+                  console.error("onWidgetImportFileSelected: ack after import (GET fallback)", ackErr);
+                  this._widgetsWriteGateOpen = false;
+                  this._widgetsAckError =
+                    ackErr instanceof Error && ackErr.message === "ACK_ENDPOINT_MISSING"
+                      ? /** @type {{ detail?: string }} */ (ackErr).detail || ackErr.message
+                      : ackErr instanceof Error
+                        ? ackErr.message
+                        : String(ackErr);
+                  this.widgetDocumentExchangeError = `Import saved on server but acknowledgement failed: ${this._widgetsAckError}`;
+                }
+                return;
+              }
+            }
+          } catch (fallbackErr) {
+            console.error("onWidgetImportFileSelected: fallback GET after PUT", fallbackErr);
+          }
+          console.error("onWidgetImportFileSelected: unexpected PUT response", rawBody);
+          this.widgetDocumentExchangeError =
+            "Import may have saved but the response could not be applied. Reload the page or use Export to verify.";
+          return;
+        }
+        this._applyServerDocumentForced(serverPayload, "Server document import applied");
+        try {
+          await this._finalizeServerDocumentIngest(rawBody, response);
+          this.widgetDocumentExchangeError = null;
+        } catch (ackErr) {
+          console.error("onWidgetImportFileSelected: ack after import", ackErr);
+          this._widgetsWriteGateOpen = false;
+          this._widgetsAckError =
+            ackErr instanceof Error && ackErr.message === "ACK_ENDPOINT_MISSING"
+              ? /** @type {{ detail?: string }} */ (ackErr).detail || ackErr.message
+              : ackErr instanceof Error
+                ? ackErr.message
+                : String(ackErr);
+          this.widgetDocumentExchangeError = `Import applied locally but acknowledgement failed: ${this._widgetsAckError}. Outbound sync stays disabled until ack succeeds.`;
+        }
+      } catch (err) {
+        console.error("onWidgetImportFileSelected", err);
+        this.widgetDocumentExchangeError =
+          err instanceof Error ? err.message : "Import failed. Check the file and API, then try again.";
+      } finally {
+        this.widgetImportBusy = false;
+      }
+    },
+
     persistToolsWidgets(options = {}) {
       saveToolsWidgets(this.toolsWidgets);
       const shouldSync = options.sync !== false;
@@ -287,7 +784,12 @@ document.addEventListener("alpine:init", () => {
       this.persistWidgetsDeferredSync();
     },
 
-    persistToolsLandingWidgets() {
+    persistToolsLandingWidgets(options = {}) {
+      const doSync = options.sync !== false;
+      if (doSync) {
+        saveToolsLandingWidgets(this.toolsLandingWidgets);
+        return this.persistWidgetsDeferredSync();
+      }
       saveToolsLandingWidgets(this.toolsLandingWidgets);
     },
 
@@ -298,16 +800,19 @@ document.addEventListener("alpine:init", () => {
       initSiteDiagnostics();
       this._onlineHandler = () => {
         this.online = true;
-        if (this._widgetsNeedSync) {
-          void this.syncToServer();
+        void (async () => {
+          await this.reconcileServerWidgets("init");
+          if (this._widgetsNeedSync && this._widgetsWriteGateOpen) {
+            void this.syncToServer();
+          }
           this._armWidgetsSyncPoller();
-          this._armWidgetsSyncPushTimer();
+          if (this._widgetsWriteGateOpen) {
+            this._armWidgetsSyncPushTimer();
+          } else {
+            this._disarmWidgetsSyncPushTimer();
+          }
           reportWidgetSyncPushFromDashboard(this);
-          return;
-        }
-        this._armWidgetsSyncPoller();
-        this._armWidgetsSyncPushTimer();
-        reportWidgetSyncPushFromDashboard(this);
+        })();
       };
       this._offlineHandler = () => {
         this.online = false;
@@ -347,14 +852,14 @@ document.addEventListener("alpine:init", () => {
           if (evaluateAllTodoResets(this.toolsWidgets)) changed = true;
           if (evaluateAllTodoResets(this.toolsLandingWidgets)) changed = true;
           if (changed) {
-            this.persistWidgets();
-            this.persistToolsWidgets();
-            this.persistToolsLandingWidgets();
+            this.persistWidgets({ sync: this._widgetsWriteGateOpen });
+            this.persistToolsWidgets({ sync: this._widgetsWriteGateOpen });
+            this.persistToolsLandingWidgets({ sync: this._widgetsWriteGateOpen });
             this.renderPageWidgets("home");
             this.renderPageWidgets("tools");
             this.renderPageWidgets("debug");
           }
-          if (this._widgetsNeedSync && this.online) {
+          if (this._widgetsNeedSync && this.online && this._widgetsWriteGateOpen) {
             void this.syncToServer();
             this._armWidgetsSyncPoller();
             this._armWidgetsSyncPushTimer();
@@ -362,7 +867,11 @@ document.addEventListener("alpine:init", () => {
           }
           this._armTodoResetTicker();
           this._armWidgetsSyncPoller();
-          this._armWidgetsSyncPushTimer();
+          if (this._widgetsWriteGateOpen) {
+            this._armWidgetsSyncPushTimer();
+          } else {
+            this._disarmWidgetsSyncPushTimer();
+          }
         } else {
           this._disarmWidgetsSyncPoller();
           this._disarmTodoResetTicker();
@@ -375,16 +884,21 @@ document.addEventListener("alpine:init", () => {
       this.renderPageWidgets("debug");
       this.persistWidgets({ sync: false });
       this.persistToolsWidgets({ sync: false });
-      this.persistToolsLandingWidgets();
+      this.persistToolsLandingWidgets({ sync: false });
       if (this._clockTicker) window.clearInterval(this._clockTicker);
       this._clockTicker = window.setInterval(() => this.refreshClock(), 1000);
-      void this.reconcileServerWidgets("init");
-      if (document.visibilityState === "visible") {
-        this._armTodoResetTicker();
-        this._armWidgetsSyncPoller();
-        this._armWidgetsSyncPushTimer();
-      }
-      reportWidgetSyncPushFromDashboard(this);
+      void this.reconcileServerWidgets("init").then(() => {
+        if (document.visibilityState === "visible") {
+          this._armTodoResetTicker();
+          this._armWidgetsSyncPoller();
+          if (this._widgetsWriteGateOpen) {
+            this._armWidgetsSyncPushTimer();
+          } else {
+            this._disarmWidgetsSyncPushTimer();
+          }
+        }
+        reportWidgetSyncPushFromDashboard(this);
+      });
     },
 
     _isWidgetEditSessionActive() {
@@ -420,7 +934,7 @@ document.addEventListener("alpine:init", () => {
 
     _applyPendingRemotePayload() {
       if (!this._widgetsPendingRemotePayload) return;
-      if (this._initialServerSyncDone) {
+      if (this._widgetsWriteGateOpen) {
         this._widgetsPendingRemotePayload = null;
         return;
       }
@@ -453,7 +967,7 @@ document.addEventListener("alpine:init", () => {
 
     _armWidgetsSyncPushTimer() {
       this._disarmWidgetsSyncPushTimer();
-      if (document.visibilityState !== "visible" || !this.online) return;
+      if (document.visibilityState !== "visible" || !this.online || !this._widgetsWriteGateOpen) return;
       this._widgetsSyncPushTimerStartedAt = Date.now();
       this._widgetsSyncPushTimer = window.setInterval(() => {
         this._widgetsSyncPushTimerStartedAt = Date.now();
@@ -485,11 +999,11 @@ document.addEventListener("alpine:init", () => {
         if (document.visibilityState !== "visible") return;
         let any = false;
         if (evaluateAllTodoResets(this.widgets)) {
-          this.persistWidgets();
+          this.persistWidgets({ sync: this._widgetsWriteGateOpen });
           any = true;
         }
         if (evaluateAllTodoResets(this.toolsWidgets)) {
-          this.persistToolsWidgets();
+          this.persistToolsWidgets({ sync: this._widgetsWriteGateOpen });
           any = true;
         }
         if (any) {
@@ -551,6 +1065,10 @@ document.addEventListener("alpine:init", () => {
 
     _resolveWidgetSyncStatusLabel() {
       if (this._widgetsSyncInFlight) return "uploading";
+      if (!this._widgetsWriteGateOpen && this.online) {
+        if (this._widgetsQueuedSyncAfterAck) return "local edits queued (writes blocked until ack)";
+        return "outbound blocked (awaiting first-open ack)";
+      }
       if (this._widgetsNeedSync) return this.online ? "pending" : "pending (offline)";
       return "synced";
     },
@@ -589,17 +1107,24 @@ document.addEventListener("alpine:init", () => {
       const status = this._widgetsLastPushOutcome?.status || "none";
       const message = (this._widgetsLastPushOutcome?.message || "").trim();
       const at = this._formatWidgetSyncTimestamp(this._widgetsLastPushOutcome?.at);
-      const statusText = message ? `${status} — ${message}` : status;
+      const statusText = message ? `${status} â€” ${message}` : status;
       return at ? `${statusText} (${at})` : statusText;
     },
 
     _resolveWidgetSyncRetrieveLabel() {
-      if (!this._initialServerSyncDone) {
-        return this._initialServerSyncInFlight
-          ? "bootstrap GET in progress"
-          : "bootstrap-only: initial GET pending";
+      if (this._widgetsWriteGateOpen) {
+        return "bootstrap-only / not currently polling (writes enabled after ack)";
       }
-      return "bootstrap-only / not currently polling";
+      if (this._widgetsBootstrapInFlight) {
+        return "first-open: GET /api/widgets in progress";
+      }
+      if (this._widgetsAckError) {
+        return `first-open blocked â€” ${this._widgetsAckError}`;
+      }
+      if (!this.online) {
+        return "first-open deferred â€” offline (server writes stay blocked until GET+ack)";
+      }
+      return "first-open pending â€” POST /api/widgets/ack required after GET apply";
     },
 
     widgetSyncStripLastSyncLabel() {
@@ -635,6 +1160,42 @@ document.addEventListener("alpine:init", () => {
     },
 
     persistWidgetsDeferredSync() {
+      const fpNext = getWidgetPayloadFingerprint(
+        this.widgets,
+        this.toolsWidgets,
+        this.toolsLandingWidgets
+      );
+      if (this._widgetsWriteGateOpen && fpNext === this._widgetsBaselineFingerprint) {
+        saveWidgets(this.widgets, { updatedAt: this._widgetsUpdatedAt });
+        saveToolsWidgets(this.toolsWidgets);
+        saveToolsLandingWidgets(this.toolsLandingWidgets);
+        this._widgetsNeedSync = false;
+        if (this._widgetsSyncTimer) {
+          window.clearTimeout(this._widgetsSyncTimer);
+          this._widgetsSyncTimer = null;
+          this._widgetsSyncDebounceStartedAt = null;
+        }
+        this._setWidgetSyncPushOutcome("skipped", "No widget content changes since last server-aligned snapshot");
+        reportWidgetSyncPushFromDashboard(this);
+        return;
+      }
+      if (!this._widgetsWriteGateOpen) {
+        const updatedAt = saveWidgets(this.widgets, { updatedAt: new Date().toISOString() });
+        this._widgetsUpdatedAt = updatedAt;
+        saveToolsWidgets(this.toolsWidgets);
+        saveToolsLandingWidgets(this.toolsLandingWidgets);
+        this._widgetsQueuedSyncAfterAck = fpNext !== this._widgetsBaselineFingerprint;
+        this._widgetsNeedSync = false;
+        if (this._widgetsSyncTimer) {
+          window.clearTimeout(this._widgetsSyncTimer);
+          this._widgetsSyncTimer = null;
+          this._widgetsSyncDebounceStartedAt = null;
+        }
+        this._setWidgetSyncPushOutcome("skipped", "Local save only â€” outbound sync blocked until first-open ack");
+        reportWidgetSyncPushFromDashboard(this);
+        return;
+      }
+
       const updatedAt = saveWidgets(this.widgets, { updatedAt: new Date().toISOString() });
       this._widgetsUpdatedAt = updatedAt;
       this._widgetsNeedSync = true;
@@ -672,13 +1233,16 @@ document.addEventListener("alpine:init", () => {
       saveToolsWidgets(this.toolsWidgets);
       saveToolsLandingWidgets(this.toolsLandingWidgets);
       /* Keep outbound queue real: persistWidgetsDeferredSync sets this when the user/tooling dirties state,
-         or a debounced PUT is still scheduled. Never force-sync on exit — forcing sync while the initial
+         or a debounced PUT is still scheduled. Never force-sync on exit â€” forcing sync while the initial
          GET reconcile is still in flight can PUT default/tentative rows and wipe the server's last good blob. */
       this._widgetsNeedSync = hadPendingOutboundSync;
       if (!this.online) {
         return;
       }
-      if (!this._initialServerSyncDone && !hadPendingOutboundSync) {
+      if (!this._widgetsWriteGateOpen) {
+        return;
+      }
+      if (!hadPendingOutboundSync) {
         return;
       }
       void this.syncToServer({ keepalive: true, source: _reason });
@@ -695,7 +1259,10 @@ document.addEventListener("alpine:init", () => {
     _reconcilePayloadLocally(payload, trigger = "poll") {
       const remoteWidgets = Array.isArray(payload?.widgets) ? payload.widgets : null;
       const remoteToolsWidgets = Array.isArray(payload?.toolsWidgets) ? payload.toolsWidgets : null;
-      if (!remoteWidgets && !remoteToolsWidgets) {
+      const remoteToolsLandingWidgets = Array.isArray(payload?.toolsLandingWidgets)
+        ? payload.toolsLandingWidgets
+        : null;
+      if (!remoteWidgets && !remoteToolsWidgets && !remoteToolsLandingWidgets) {
         if (trigger !== "visible") {
           console.error("Invalid widgets payload from server", payload);
         }
@@ -724,12 +1291,14 @@ document.addEventListener("alpine:init", () => {
       const applyRemotePayload = () => {
         if (remoteWidgets) this.widgets = removeDeprecatedHomeWidgets(remoteWidgets);
         if (remoteToolsWidgets) this.toolsWidgets = remoteToolsWidgets;
+        if (remoteToolsLandingWidgets) this.toolsLandingWidgets = remoteToolsLandingWidgets;
         evaluateAllTodoResets(this.widgets);
         evaluateAllTodoResets(this.toolsWidgets);
         this._widgetsUpdatedAt = payload.updatedAt || this._widgetsUpdatedAt;
         this._widgetsNeedSync = false;
         this.persistWidgets({ sync: false });
         this.persistToolsWidgets({ sync: false });
+        this.persistToolsLandingWidgets({ sync: false });
         this.renderPageWidgets("home");
         this.renderPageWidgets("tools");
         this.renderPageWidgets("debug");
@@ -739,6 +1308,7 @@ document.addEventListener("alpine:init", () => {
         this._widgetsNeedSync = true;
         this.persistWidgets({ sync: true });
         this.persistToolsWidgets({ sync: true });
+        this.persistToolsLandingWidgets({ sync: true });
         this.renderPageWidgets("home");
         this.renderPageWidgets("tools");
         this.renderPageWidgets("debug");
@@ -760,10 +1330,10 @@ document.addEventListener("alpine:init", () => {
       if (trigger !== "init") {
         return;
       }
-      if (this._initialServerSyncDone || this._initialServerSyncInFlight) {
+      if (this._widgetsWriteGateOpen || this._widgetsBootstrapInFlight) {
         return;
       }
-      this._initialServerSyncInFlight = true;
+      this._widgetsBootstrapInFlight = true;
       reportWidgetSyncRetrieve("attempt");
 
       try {
@@ -774,7 +1344,7 @@ document.addEventListener("alpine:init", () => {
 
         const response = await fetch(WIDGETS_API_URL, {
           method: "GET",
-          headers: { "Accept": "application/json" },
+          headers: { Accept: "application/json" },
           cache: "no-store",
         });
         if (!response.ok) {
@@ -783,31 +1353,61 @@ document.addEventListener("alpine:init", () => {
 
         const raw = await response.json();
         const payload = loadWidgetPayloadFromApi(raw) || pickServerPayload(raw);
-        if (!payload || !Array.isArray(payload.widgets)) {
-          if (trigger !== "visible") {
-            console.error("Invalid widgets payload from server", raw);
-          }
-          reportWidgetSyncRetrieve("invalid", "Missing usable widgets[] in server JSON");
+        if (
+          !payload ||
+          (!Array.isArray(payload.widgets) &&
+            !Array.isArray(payload.toolsWidgets) &&
+            !Array.isArray(payload.toolsLandingWidgets))
+        ) {
+          console.error("Invalid widgets payload from server", raw);
+          reportWidgetSyncRetrieve("invalid", "Missing usable widget arrays in server JSON");
+          return;
+        }
+        if (!Array.isArray(payload.widgets)) {
+          reportWidgetSyncRetrieve("invalid", "Server document must include home widgets[] for bootstrap");
           return;
         }
 
-        this._reconcilePayloadLocally(payload, trigger);
-        this._applyPendingRemotePayload();
+        const applied = this._applyServerDocumentForced(
+          {
+            widgets: payload.widgets,
+            toolsWidgets: payload.toolsWidgets ?? [],
+            toolsLandingWidgets: payload.toolsLandingWidgets ?? [],
+            updatedAt: payload.updatedAt,
+          },
+          "Bootstrap server snapshot applied"
+        );
+        if (!applied) {
+          reportWidgetSyncRetrieve("invalid", "Could not apply server widget document");
+          return;
+        }
+
         this._widgetsLastSyncPullAt = new Date().toISOString();
         const okDetail =
           typeof payload.updatedAt === "string" && payload.updatedAt.trim()
             ? `updatedAt ${payload.updatedAt}`
-            : "Server document merged";
+            : "Server document applied locally";
         reportWidgetSyncRetrieve("success", okDetail);
-      } catch (error) {
-        if (trigger !== "visible") {
-          console.error("Widget sync fetch failed", error);
+
+        try {
+          await this._finalizeServerDocumentIngest(raw, response);
+        } catch (ackErr) {
+          console.error("Widget bootstrap: POST /api/widgets/ack failed", ackErr);
+          this._widgetsWriteGateOpen = false;
+          this._widgetsAckError =
+            ackErr instanceof Error && ackErr.message === "ACK_ENDPOINT_MISSING"
+              ? /** @type {{ detail?: string }} */ (ackErr).detail || ackErr.message
+              : ackErr instanceof Error
+                ? ackErr.message
+                : String(ackErr);
+          reportWidgetSyncRetrieve("ack_error", this._widgetsAckError);
         }
+      } catch (error) {
+        console.error("Widget sync fetch failed", error);
         const msg = error instanceof Error ? error.message : String(error);
         reportWidgetSyncRetrieve("error", msg);
       } finally {
-        this._initialServerSyncDone = true;
-        this._initialServerSyncInFlight = false;
+        this._widgetsBootstrapInFlight = false;
         this._widgetsPendingRemotePayload = null;
         reportWidgetSyncPushFromDashboard(this);
       }
@@ -818,6 +1418,12 @@ document.addEventListener("alpine:init", () => {
       const keepaliveSource = options.source || "manual";
       if (!this.online) {
         this._setWidgetSyncPushOutcome("skipped", "Offline (will retry when online)");
+        reportWidgetSyncPushFromDashboard(this);
+        return;
+      }
+
+      if (!this._widgetsWriteGateOpen) {
+        this._setWidgetSyncPushOutcome("skipped", "Outbound blocked until first-open GET+apply+POST /api/widgets/ack");
         reportWidgetSyncPushFromDashboard(this);
         return;
       }
@@ -836,7 +1442,17 @@ document.addEventListener("alpine:init", () => {
       const nextPayload = getWidgetPayloadForApi(this.widgets, {
         updatedAt: this._widgetsUpdatedAt,
         toolsWidgets: this.toolsWidgets,
+        toolsLandingWidgets: this.toolsLandingWidgets,
       });
+      const expectRevision = normaliseRevisionToken(this._widgetsAckRevision);
+      if (!expectRevision) {
+        const msg = "Cannot sync: no revision token is available from first-open ACK.";
+        console.error("Widget sync save failed", new Error(msg));
+        this._setWidgetSyncPushOutcome("failed", msg);
+        reportWidgetSyncPushEvent("fail", msg, this);
+        return;
+      }
+      nextPayload.expectRevision = expectRevision;
       const serializedPayload = JSON.stringify(nextPayload);
       const syncAttemptedUpdatedAt = this._widgetsUpdatedAt;
       this._widgetsSyncInFlight = true;
@@ -847,15 +1463,19 @@ document.addEventListener("alpine:init", () => {
         this._widgetsSyncAbort = controller;
       }
 
+      const putHeaders = {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+      putHeaders["X-Calvybots-Widgets-Revision"] = expectRevision;
+      putHeaders["If-Match"] = `"${expectRevision}"`;
+
       try {
         let response;
         try {
           response = await fetch(WIDGETS_API_URL, {
             method: "PUT",
-            headers: {
-              "Content-Type": "application/json",
-              "Accept": "application/json",
-            },
+            headers: putHeaders,
             body: serializedPayload,
             ...(controller ? { signal: controller.signal } : {}),
             ...(useKeepalive ? { keepalive: true } : {}),
@@ -888,17 +1508,43 @@ document.addEventListener("alpine:init", () => {
           }
           throw error;
         }
+
+        const responseText = await response.text();
+        let body = null;
+        try {
+          body = responseText ? JSON.parse(responseText) : null;
+        } catch {
+          body = null;
+        }
+        const responseRevision = extractServerRevisionFromWidgetsResponse(
+          body,
+          response?.headers?.get?.("etag") || response?.headers?.get?.("ETag")
+        );
+        if (responseRevision) {
+          this._widgetsAckRevision = responseRevision;
+        }
+        if (response.status === 409 || response.status === 428) {
+          this._widgetsNeedSync = true;
+          const msg = makeSyncFailureErrorMessage(response, responseText);
+          this._setWidgetSyncPushOutcome("failed", msg);
+          reportWidgetSyncPushEvent("fail", msg, this);
+          return;
+        }
+
         if (!response.ok) {
-          let bodyText = "";
-          try {
-            bodyText = await response.text();
-          } catch {
-            bodyText = "";
+          throw new Error(makeSyncFailureErrorMessage(response, responseText));
+        }
+
+        if (body && body.skipped === true) {
+          this._syncBaselineToCurrent();
+          this._widgetsNeedSync = false;
+          if (typeof body.revision === "string" && body.revision.trim()) {
+            this._widgetsAckRevision = body.revision.trim();
           }
-          const detail = bodyText ? ` ${bodyText.trim().slice(0, 240)}` : "";
-          throw new Error(
-            `PUT ${WIDGETS_API_URL} failed: ${response.status} ${response.statusText}${detail}`
-          );
+          this._widgetsLastSyncPushAt = new Date().toISOString();
+          this._setWidgetSyncPushOutcome("success", "Server skipped no-op write");
+          reportWidgetSyncPushEvent("success", "skipped no-op", this);
+          return;
         }
 
         const hadUnsentLocalChanges = this._widgetsUpdatedAt !== syncAttemptedUpdatedAt;
@@ -906,11 +1552,14 @@ document.addEventListener("alpine:init", () => {
           this._widgetsNeedSync = false;
         }
         this._widgetsLastSyncPushAt = new Date().toISOString();
-        const body = await response.json().catch(() => null);
         const serverPayload = body ? loadWidgetPayloadFromApi(body) || pickServerPayload(body) : null;
         if (serverPayload?.updatedAt && this._widgetsUpdatedAt === syncAttemptedUpdatedAt) {
           this._widgetsUpdatedAt = serverPayload.updatedAt;
         }
+        if (body && typeof body.revision === "string" && body.revision.trim()) {
+          this._widgetsAckRevision = body.revision.trim();
+        }
+        this._syncBaselineToCurrent();
         const okDetail =
           serverPayload?.updatedAt && typeof serverPayload.updatedAt === "string"
             ? `server updatedAt ${serverPayload.updatedAt}`
@@ -929,7 +1578,6 @@ document.addEventListener("alpine:init", () => {
         this._applyPendingRemotePayload();
         reportWidgetSyncPushFromDashboard(this);
       }
-
     },
 
     normalizeWidgets() {
@@ -967,7 +1615,7 @@ document.addEventListener("alpine:init", () => {
 
       if (isTools && (!Array.isArray(this.toolsLandingWidgets) || this.toolsLandingWidgets.length === 0)) {
         this.toolsLandingWidgets = loadToolsLandingWidgets();
-        this.persistToolsLandingWidgets();
+        this.persistToolsLandingWidgets({ sync: this._widgetsWriteGateOpen });
       }
       const ctrls = isHome ? controllers : isTools ? toolsControllers : debugControllers;
       const ros = isHome ? resizeObservers : isTools ? toolsResizeObservers : debugResizeObservers;
@@ -1059,7 +1707,7 @@ document.addEventListener("alpine:init", () => {
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "widget-remove";
-        removeBtn.textContent = "×";
+        removeBtn.textContent = "Ã—";
         removeBtn.title = "Remove widget";
         removeBtn.setAttribute("aria-label", `Remove ${widgetDisplayName(config)} widget`);
         removeBtn.style.display = this.editMode ? "grid" : "none";
@@ -1068,7 +1716,7 @@ document.addEventListener("alpine:init", () => {
 
         const dragHandle = document.createElement("button");
         dragHandle.className = "widget-handle";
-        dragHandle.textContent = "⠿";
+        dragHandle.textContent = "â ¿";
         dragHandle.style.display = this.editMode ? "grid" : "none";
         dragHandle.title = "Drag to move";
         dragHandle.type = "button";
@@ -1142,7 +1790,7 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
-    /** Rebuild both grids — used by widgets (e.g. To-Do) that expect `dashboard.renderWidgets()`. */
+    /** Rebuild both grids â€” used by widgets (e.g. To-Do) that expect `dashboard.renderWidgets()`. */
     renderWidgets() {
       this.renderPageWidgets("home");
       this.renderPageWidgets("tools");
@@ -1744,3 +2392,8 @@ document.addEventListener("alpine:init", () => {
   };
   });
 });
+
+
+
+
+

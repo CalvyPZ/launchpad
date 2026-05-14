@@ -200,9 +200,9 @@ function parseUpdatedAt(rawUpdatedAt) {
 }
 
 function coerceWidgetsPayload(rawPayload) {
-  if (!rawPayload) return { widgetsRaw: null, toolsWidgetsRaw: null, updatedAt: null };
-  if (Array.isArray(rawPayload)) return { widgetsRaw: rawPayload, toolsWidgetsRaw: null, updatedAt: null };
-  if (typeof rawPayload !== "object") return { widgetsRaw: null, toolsWidgetsRaw: null, updatedAt: null };
+  if (!rawPayload) return { widgetsRaw: null, toolsWidgetsRaw: null, toolsLandingWidgetsRaw: null, updatedAt: null };
+  if (Array.isArray(rawPayload)) return { widgetsRaw: rawPayload, toolsWidgetsRaw: null, toolsLandingWidgetsRaw: null, updatedAt: null };
+  if (typeof rawPayload !== "object") return { widgetsRaw: null, toolsWidgetsRaw: null, toolsLandingWidgetsRaw: null, updatedAt: null };
 
   const widgetsRaw = Array.isArray(rawPayload.widgets)
     ? rawPayload.widgets
@@ -214,11 +214,16 @@ function coerceWidgetsPayload(rawPayload) {
     : Array.isArray(rawPayload.data?.toolsWidgets)
     ? rawPayload.data.toolsWidgets
     : null;
+  const toolsLandingWidgetsRaw = Array.isArray(rawPayload.toolsLandingWidgets)
+    ? rawPayload.toolsLandingWidgets
+    : Array.isArray(rawPayload.data?.toolsLandingWidgets)
+    ? rawPayload.data.toolsLandingWidgets
+    : null;
   const updatedAt = parseUpdatedAt(
     rawPayload.updatedAt || rawPayload.updated_at || rawPayload.lastUpdated
   );
 
-  return { widgetsRaw, toolsWidgetsRaw, updatedAt };
+  return { widgetsRaw, toolsWidgetsRaw, toolsLandingWidgetsRaw, updatedAt };
 }
 
 export function normaliseWidgetRows(rawItems) {
@@ -576,7 +581,7 @@ export function normaliseToolsRows(rawItems) {
   }));
 }
 
-function normaliseToolsLandingRows(rawItems) {
+export function normaliseToolsLandingRows(rawItems) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     return DEFAULT_TOOLS_TAB_WIDGETS.map((w, i) => {
       const row = {
@@ -681,6 +686,7 @@ export function saveWidgets(widgets, options = {}) {
 
 export function getWidgetPayloadForApi(widgets, options = {}) {
   const toolsWidgets = options.toolsWidgets;
+  const toolsLandingWidgets = options.toolsLandingWidgets;
   const updatedAt =
     "updatedAt" in options ? parseUpdatedAt(options.updatedAt) : new Date().toISOString();
   return {
@@ -688,17 +694,32 @@ export function getWidgetPayloadForApi(widgets, options = {}) {
     updatedAt,
     widgets: normaliseWidgetRows(widgets || []),
     ...(Array.isArray(toolsWidgets) ? { toolsWidgets: normaliseToolsRows(toolsWidgets || []) } : {}),
+    ...(Array.isArray(toolsLandingWidgets)
+      ? { toolsLandingWidgets: normaliseToolsLandingRows(toolsLandingWidgets) }
+      : {}),
   };
+}
+
+/** Content-only fingerprint for dirty detection (ignores updatedAt / version noise). */
+export function getWidgetPayloadFingerprint(widgets, toolsWidgets, toolsLandingWidgets) {
+  return JSON.stringify({
+    widgets: normaliseWidgetRows(widgets || []),
+    toolsWidgets: normaliseToolsRows(toolsWidgets ?? null),
+    toolsLandingWidgets: normaliseToolsLandingRows(toolsLandingWidgets ?? null),
+  });
 }
 
 export function loadWidgetPayloadFromApi(raw) {
   const payload = coerceWidgetsPayload(raw);
-  if (!payload.widgetsRaw && !payload.toolsWidgetsRaw) return null;
+  if (!payload.widgetsRaw && !payload.toolsWidgetsRaw && !payload.toolsLandingWidgetsRaw) return null;
   return {
     version: (raw && raw.version) || WIDGETS_DOCUMENT_VERSION,
     updatedAt: payload.updatedAt,
     widgets: payload.widgetsRaw ? normaliseWidgetRows(payload.widgetsRaw) : null,
     toolsWidgets: payload.toolsWidgetsRaw ? normaliseToolsRows(payload.toolsWidgetsRaw) : null,
+    toolsLandingWidgets: payload.toolsLandingWidgetsRaw
+      ? normaliseToolsLandingRows(payload.toolsLandingWidgetsRaw)
+      : null,
   };
 }
 

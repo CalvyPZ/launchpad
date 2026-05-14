@@ -275,6 +275,21 @@ footer {
   gap: 0.5rem;
 }
 
+.widget-sync-strip-doc-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  width: 100%;
+}
+
+.widget-sync-strip-doc-hint {
+  margin: 0;
+  max-width: 100%;
+  line-height: 1.35;
+  color: #5c5c5c;
+}
+
 .widget-sync-strip-force-btn {
   align-self: flex-start;
   min-height: 42px;

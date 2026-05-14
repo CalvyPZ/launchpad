@@ -124,28 +124,40 @@ The API is mounted at `/api/*` and served via nginx reverse proxy.
 
 ### `GET /api/widgets`
 
-- Purpose: return persisted dashboard document from `../data/widgets.json` (relative to `api` service path).
+- Purpose: return persisted dashboard document from `../data/widgets.json` (relative to `api` service path), plus a **content revision** for conditional writes and first-open ack.
 - Response: JSON object
   - `schemaVersion`: integer (currently `2`)
   - `updatedAt`: ISO-8601 timestamp string
-  - `widgets`: array of widget rows
-  - `toolsWidgets`: array of tool-page widget rows (same row contract as `widgets`)
-    - required per row:
-      - `id`: string
-      - `type`: string
-      - `position`: integer
-    - optional per row:
-      - `visible`, `title`, `minWidth`, `minHeight`, `width`, `height`
-      - `notesState` for `type: "notes"`
-      - `todoState` for `type: "todo"`
+  - `widgets`: array of home widget rows
+  - `toolsWidgets`: array of Debug-tab tool widget rows (same row contract as `widgets`)
+  - `toolsLandingWidgets`: array of Tools-tab landing rows (same row contract where row-shaped; `fortnight` rows carry `fortnightState`)
+  - `revision`: opaque **hex string** (SHA-256 over a canonical encoding of `schemaVersion`, `updatedAt`, and the three widget arrays). Not stored in `widgets.json`; derived at read time. Unchanged until a successful mutating `PUT` changes stored content.
 - Error response (500): `{"error":"Failed to read widgets","detail":"..."}` when file read/parsing fails.
 
-### `PUT /api/widgets`
+### `POST /api/widgets/ack`
 
-- Purpose: replace the persisted dashboard document.
-- Request body: same object shape as `GET /api/widgets`, with `toolsWidgets` optional.
-- Response:
-  - `200` with the stored object body (including refreshed `updatedAt`).
+- Purpose: **first-open / bootstrap gate** (single-user LAN): client confirms it has received and applied the current full `GET /api/widgets` payload. Until this succeeds once per API process, `PUT` / `POST /api/widgets` return **428** with `code: "ACK_REQUIRED"`. The gate resets when the API process restarts.
+- Request headers: `Content-Type: application/json` (required).
+- Request body: JSON object `{ "revision": "<value from GET /api/widgets>" }`.
+- Responses:
+  - **200** `{ "ok": true, "acknowledged": true, "revision": "<current>" }` when `revision` matches the live document.
+  - **400** invalid JSON or missing `revision` string (`code: "REVISION_REQUIRED"` when applicable).
+  - **409** `code: "ACK_REVISION_MISMATCH"` when `revision` is not the current server revision; body may include `currentRevision` for client refresh.
+  - **415** `code: "JSON_REQUIRED"` when `Content-Type` is not `application/json`.
+
+### `PUT /api/widgets` and `POST /api/widgets`
+
+- Purpose: replace the persisted dashboard document (same handler). `POST` exists for `navigator.sendBeacon` unload paths (JSON body only).
+- Preconditions:
+  - Successful **`POST /api/widgets/ack`** for this API process (see above).
+  - Request **`Content-Type: application/json`** (otherwise **415** `JSON_REQUIRED`).
+  - Body must include **`expectRevision`** (string), equal to the **`revision`** from the latest successful `GET /api/widgets` **before** this write, **or** send equivalent value in **`If-Match`** header. If missing: **400** `code: "EXPECT_REVISION_REQUIRED"`. If wrong: **409** `code: "STALE_REVISION"` and `currentRevision` ? server data is not overwritten.
+- Request body: same persisted shape as stored document (`widgets` required array; `toolsWidgets` / `toolsLandingWidgets` optional arrays; `schemaVersion` / `updatedAt` optional ? server normalizes rows and preserves a plausible client `updatedAt` when valid ISO). **Do not** rely on persisting `revision`, `expectRevision`, or `skipped` ? they are stripped before save.
+- Response **200** (success write):
+  - Full stored document fields plus `revision` (new content hash) and `skipped: false`.
+- Response **200** (no-op / dirty-write suppression):
+  - Current stored document fields, same `revision` as before write, and **`skipped: true`** ? `widgets.json` is not rewritten when normalized widget content is semantically identical to what is already stored.
+- Error **428** `code: "ACK_REQUIRED"`: no mutating write until ack completes.
 - Payload validation:
   - request body must be a JSON object
   - `widgets` must be an array

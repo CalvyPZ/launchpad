@@ -5,13 +5,26 @@
  * No external dependencies ? plain Node.js http module only.
  *
  * Routes (see data/schema.md for response shapes):
- *   GET /api/health       ? liveness check
- *   GET /api/system       ? runtime diagnostics
- *   GET /api/config       ? serves ../data/config.json
- *   GET /api/widgets      ? returns persisted widget document
- *   PUT /api/widgets      ? validates + persists widget document atomically
- *   POST /api/widgets      ? same as PUT (navigator.sendBeacon can only POST; used as unload fallback)
- *   *                    ? 404 JSON
+ *   GET /api/health          ? liveness check
+ *   GET /api/system          ? runtime diagnostics
+ *   GET /api/config          ? serves ../data/config.json
+ *   GET /api/widgets         ? full widget document + `revision` (SHA-256 of canonical payload; not stored on disk)
+ *   POST /api/widgets/ack    ? first-open gate: body `{ "revision": "<from GET>" }` must match current document;
+ *                              on success sets in-process write allowance (single-user LAN; resets on API restart)
+ *   PUT /api/widgets         ? requires prior successful ack for this process; body must include `expectRevision`
+ *                              matching current revision or 409 STALE_REVISION; semantic no-op skips disk write
+ *   POST /api/widgets        ? same as PUT (sendBeacon / unload); must include `expectRevision`
+ *                              in JSON body (canonical), `If-Match` header, or
+ *                              `X-Calvybots-Widgets-Revision` header (compatibility alias)
+ *   *                        ? 404 JSON
+ *
+ * Contract summary (coordination with frontend):
+ * - `revision` / `expectRevision`: opaque hex string from GET; resend on PUT until server accepts or returns 409.
+ *   Server accepts canonical write tokens in JSON body `expectRevision` or `If-Match` header.
+ *   `X-Calvybots-Widgets-Revision` remains supported as a compatibility alias only.
+ * - `428` + `{ code: "ACK_REQUIRED" }`: no PUT until POST /api/widgets/ack succeeds for the loaded snapshot.
+ * - `200` + `{ skipped: true }`: normalized payload equals current stored content ? no `widgets.json` rewrite.
+ * - Destructive import uses same PUT path with full document + `expectRevision` from GET immediately before import.
  */
 
 'use strict';
@@ -19,6 +32,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT) || 3000;
 const CONFIG_PATH = path.resolve(__dirname, '..', 'data', 'config.json');
@@ -33,6 +47,74 @@ const DEFAULT_MIN_HEIGHT = 178;
 const MAX_WIDGET_PAYLOAD_BYTES = 2 * 1024 * 1024;
 
 let writeQueue = Promise.resolve();
+
+/**
+ * First-open / bootstrap write gate (in-memory, single API process).
+ * PUT/POST /api/widgets are rejected with 428 ACK_REQUIRED until a client
+ * successfully POSTs /api/widgets/ack with the same `revision` as GET /api/widgets.
+ * Resets on API restart (clients must GET + ack again).
+ */
+let bootstrapWriteUnlocked = false;
+
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+}
+
+function computeDocumentRevision(doc) {
+  const basis = {
+    schemaVersion: doc.schemaVersion,
+    updatedAt: doc.updatedAt,
+    widgets: doc.widgets,
+    toolsWidgets: doc.toolsWidgets,
+    toolsLandingWidgets: doc.toolsLandingWidgets,
+  };
+  return crypto.createHash('sha256').update(stableStringify(basis), 'utf8').digest('hex');
+}
+
+/** Semantic equality of persisted widget surfaces (excludes updatedAt for no-op detection). */
+function computeContentFingerprint(doc) {
+  const basis = {
+    schemaVersion: doc.schemaVersion,
+    widgets: doc.widgets,
+    toolsWidgets: doc.toolsWidgets,
+    toolsLandingWidgets: doc.toolsLandingWidgets,
+  };
+  return crypto.createHash('sha256').update(stableStringify(basis), 'utf8').digest('hex');
+}
+
+function contentTypeIsApplicationJson(req) {
+  const raw = req.headers['content-type'];
+  if (!raw || typeof raw !== 'string') return false;
+  const primary = raw.split(';')[0].trim().toLowerCase();
+  return primary === 'application/json';
+}
+
+function isPlausibleIsoTimestamp(value) {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  const t = Date.parse(value.trim());
+  return Number.isFinite(t);
+}
+
+/** Strip API-only fields so they are never persisted into widgets.json */
+function stripClientMetaFromPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  const copy = { ...payload };
+  delete copy.expectRevision;
+  delete copy.revision;
+  delete copy.skipped;
+  delete copy.acknowledged;
+  delete copy.ok;
+  return copy;
+}
 
 function uptime() {
   return Math.floor((Date.now() - startTime) / 1000);
@@ -108,6 +190,7 @@ function buildDefaultWidgetDocument() {
     updatedAt: new Date().toISOString(),
     widgets: buildDefaultWidgetRows(),
     toolsWidgets: [],
+    toolsLandingWidgets: [],
   };
 }
 
@@ -151,6 +234,69 @@ function normalizeTodoState(raw) {
     timeLocal: typeof raw.timeLocal === 'string' ? raw.timeLocal : base.timeLocal,
     weekday: normalizeNumber(raw.weekday, base.weekday),
     lastResetAt: raw.lastResetAt == null ? null : String(raw.lastResetAt),
+  };
+}
+
+function todayDateInputString() {
+  const d = new Date();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+function buildDefaultFortnightState() {
+  const today = todayDateInputString();
+  return {
+    fnStartDate: today,
+    lineAtStart: 1,
+    rotateFrom: 1,
+    rotateTo: 12,
+    targetDate: today,
+  };
+}
+
+function normalizeFortnightDate(value, fallback) {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return fallback;
+  const parsed = new Date(`${trimmed}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? fallback : trimmed;
+}
+
+function normalizeFortnightInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * Mirrors `mergeFortnightState` in `js/store.js` so server-side validation matches
+ * the frontend contract for Tools landing fortnight rows. Whitelisted fields only.
+ */
+function normalizeFortnightState(raw) {
+  const base = buildDefaultFortnightState();
+  if (!raw || typeof raw !== 'object') return base;
+
+  const rotateFromRaw = normalizeFortnightInt(raw.rotateFrom, base.rotateFrom);
+  const rotateToRaw = normalizeFortnightInt(raw.rotateTo, base.rotateTo);
+  const rotateFrom = rotateFromRaw > rotateToRaw ? rotateToRaw : rotateFromRaw;
+  const rotateTo = rotateFromRaw > rotateToRaw ? rotateFromRaw : rotateToRaw;
+
+  const fnStartDate = normalizeFortnightDate(raw.fnStartDate, base.fnStartDate);
+  const targetDate = normalizeFortnightDate(raw.targetDate, fnStartDate);
+
+  const lineAtStartRaw = normalizeFortnightInt(raw.lineAtStart, base.lineAtStart);
+  const lineAtStart = lineAtStartRaw < rotateFrom
+    ? rotateFrom
+    : lineAtStartRaw > rotateTo
+    ? rotateTo
+    : lineAtStartRaw;
+
+  return {
+    fnStartDate,
+    lineAtStart,
+    rotateFrom,
+    rotateTo,
+    targetDate,
   };
 }
 
@@ -220,6 +366,10 @@ function parseAndNormalizeRow(rawRow, index) {
 
   if (type === 'todo') {
     row.todoState = normalizeTodoState(rawRow.todoState);
+  }
+
+  if (type === 'fortnight') {
+    row.fortnightState = normalizeFortnightState(rawRow.fortnightState);
   }
 
   return { ok: true, value: row };
@@ -322,18 +472,29 @@ function parseAndNormalizeWidgetsPayload(payload) {
     return toolsWidgetsResult;
   }
 
+  const toolsLandingWidgetsResult = parseWidgetRowsPayload(payload, 'toolsLandingWidgets', { required: false });
+  if (!toolsLandingWidgetsResult.ok) {
+    return toolsLandingWidgetsResult;
+  }
+
   const requestedSchemaVersion = Number.isInteger(payload.schemaVersion)
     ? payload.schemaVersion
     : WIDGETS_SCHEMA_VERSION;
   const schemaVersion = Math.max(requestedSchemaVersion, WIDGETS_SCHEMA_VERSION);
 
+  const updatedAt =
+    isPlausibleIsoTimestamp(payload.updatedAt)
+      ? String(payload.updatedAt).trim()
+      : new Date().toISOString();
+
   return {
     ok: true,
     value: {
       schemaVersion,
-      updatedAt: new Date().toISOString(),
+      updatedAt,
       widgets: widgetsResult.value,
       toolsWidgets: toolsWidgetsResult.value,
+      toolsLandingWidgets: toolsLandingWidgetsResult.value,
     },
   };
 }
@@ -350,6 +511,16 @@ function normalizeStoredDocument(payload) {
   };
 }
 
+/** Stable in-memory default when widgets.json is missing or invalid (until first successful persist). */
+let missingFileDefaultSnapshot = null;
+
+function getOrCreateMissingFileDefaultDocument() {
+  if (!missingFileDefaultSnapshot) {
+    missingFileDefaultSnapshot = buildDefaultWidgetDocument();
+  }
+  return JSON.parse(JSON.stringify(missingFileDefaultSnapshot));
+}
+
 async function readWidgetsFromDisk() {
   try {
     const raw = await fsp.readFile(WIDGETS_PATH, 'utf8');
@@ -357,7 +528,7 @@ async function readWidgetsFromDisk() {
     return normalizeStoredDocument(parsed);
   } catch (error) {
     if (error.code === 'ENOENT' || error instanceof SyntaxError) {
-      return buildDefaultWidgetDocument();
+      return getOrCreateMissingFileDefaultDocument();
     }
     throw error;
   }
@@ -468,7 +639,8 @@ function handleConfig(res) {
 async function handleGetWidgets(res) {
   try {
     const doc = await readWidgetsFromDisk();
-    sendJson(res, 200, doc);
+    const revision = computeDocumentRevision(doc);
+    sendJson(res, 200, { ...doc, revision });
   } catch (error) {
     console.error('[api] Failed to read widgets:', error);
     sendJson(res, 500, {
@@ -478,8 +650,156 @@ async function handleGetWidgets(res) {
   }
 }
 
+const WRITE_REVISION_TOKEN_SOURCES = [
+  'body.expectRevision',
+  'header.If-Match',
+  'header.X-Calvybots-Widgets-Revision (compatibility alias)',
+];
+
+function readExpectRevisionFromRequest(req, parsed) {
+  if (parsed && typeof parsed.expectRevision === 'string' && parsed.expectRevision.trim()) {
+    return {
+      value: parsed.expectRevision.trim(),
+      source: 'body.expectRevision',
+    };
+  }
+
+  const im = req.headers['if-match'];
+  if (im && typeof im === 'string') {
+    const v = im.trim().replace(/^W\//i, '').replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+    if (v) {
+      return {
+        value: v,
+        source: 'header.If-Match',
+      };
+    }
+  }
+
+  const customRevisionHeader =
+    req.headers['x-calvybots-widgets-revision'] || req.headers['X-Calvybots-Widgets-Revision'];
+  if (customRevisionHeader && typeof customRevisionHeader === 'string' && customRevisionHeader.trim()) {
+    return {
+      value: customRevisionHeader.trim(),
+      source: 'header.X-Calvybots-Widgets-Revision',
+    };
+  }
+
+  return {
+    value: null,
+    source: null,
+  };
+}
+
+async function handlePostWidgetsAck(req, res) {
+  try {
+    if (!contentTypeIsApplicationJson(req)) {
+      sendJson(res, 415, {
+        error: 'Unsupported Media Type',
+        detail: 'Content-Type must be application/json',
+        code: 'JSON_REQUIRED',
+      });
+      return;
+    }
+
+    const body = await readRequestBody(req);
+
+    if (!body.trim()) {
+      sendJson(res, 400, {
+        error: 'Invalid payload',
+        detail: 'Request body is required',
+        code: 'EMPTY_BODY',
+      });
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch (parseErr) {
+      sendJson(res, 400, {
+        error: 'Invalid payload',
+        detail: parseErr.message,
+      });
+      return;
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      sendJson(res, 400, {
+        error: 'Invalid payload',
+        detail: 'Body must be a JSON object',
+      });
+      return;
+    }
+
+    if (typeof parsed.revision !== 'string' || !parsed.revision.trim()) {
+      sendJson(res, 400, {
+        error: 'Invalid payload',
+        detail: 'Body must include a non-empty string revision (use GET /api/widgets revision field)',
+        code: 'REVISION_REQUIRED',
+      });
+      return;
+    }
+
+    const doc = await readWidgetsFromDisk();
+    const currentRevision = computeDocumentRevision(doc);
+    const clientRev = parsed.revision.trim();
+
+    if (clientRev !== currentRevision) {
+      console.warn('[api] POST /api/widgets/ack rejected (revision mismatch)', {
+        clientPrefix: clientRev.slice(0, 12),
+        currentPrefix: currentRevision.slice(0, 12),
+      });
+      sendJson(res, 409, {
+        error: 'Revision mismatch',
+        detail: 'Provided revision does not match the current server document; re-fetch GET /api/widgets',
+        code: 'ACK_REVISION_MISMATCH',
+        currentRevision,
+      });
+      return;
+    }
+
+    bootstrapWriteUnlocked = true;
+    console.log('[api] POST /api/widgets/ack OK', { revision: `${currentRevision.slice(0, 12)}…` });
+    sendJson(res, 200, {
+      ok: true,
+      acknowledged: true,
+      revision: currentRevision,
+    });
+  } catch (error) {
+    const status = error && Number.isInteger(error.status) ? error.status : 500;
+    console.error('[api] POST /api/widgets/ack FAILED', {
+      status,
+      message: error && error.message,
+      detail: error && error.detail,
+    });
+    sendJson(res, status, {
+      error: error && error.error ? error.error : 'Request failed',
+      detail: error && error.detail ? error.detail : error.message,
+    });
+  }
+}
+
 async function handlePutWidgets(req, res) {
   try {
+    if (!contentTypeIsApplicationJson(req)) {
+      sendJson(res, 415, {
+        error: 'Unsupported Media Type',
+        detail: 'Content-Type must be application/json',
+        code: 'JSON_REQUIRED',
+      });
+      return;
+    }
+
+    if (!bootstrapWriteUnlocked) {
+      console.warn('[api] PUT /api/widgets rejected (bootstrap ack not completed)');
+      sendJson(res, 428, {
+        error: 'Acknowledgement required',
+        detail: 'Apply GET /api/widgets payload locally, then POST /api/widgets/ack with { revision } before writing',
+        code: 'ACK_REQUIRED',
+      });
+      return;
+    }
+
     const body = await readRequestBody(req);
 
     if (!body.trim()) {
@@ -501,7 +821,40 @@ async function handlePutWidgets(req, res) {
       return;
     }
 
-    const normalized = parseAndNormalizeWidgetsPayload(parsed);
+    const expectRevisionInput = readExpectRevisionFromRequest(req, parsed);
+    if (!expectRevisionInput.value) {
+      sendJson(res, 400, {
+        error: 'Invalid payload',
+        detail: 'expectRevision is required for writes; provide it in body.expectRevision, If-Match header, or X-Calvybots-Widgets-Revision compatibility header',
+        code: 'EXPECT_REVISION_REQUIRED',
+        acceptedRevisionSources: WRITE_REVISION_TOKEN_SOURCES,
+      });
+      return;
+    }
+
+    const expectRevision = expectRevisionInput.value;
+
+    const diskDoc = await readWidgetsFromDisk();
+    const currentRevision = computeDocumentRevision(diskDoc);
+
+    if (expectRevision !== currentRevision) {
+      console.warn('[api] PUT /api/widgets rejected (stale expectRevision)', {
+        expectPrefix: expectRevision.slice(0, 12),
+        currentPrefix: currentRevision.slice(0, 12),
+      });
+      sendJson(res, 409, {
+        error: 'Stale revision',
+        detail: 'expectRevision does not match the current server document; re-fetch GET /api/widgets',
+        code: 'STALE_REVISION',
+        expectRevisionSource: expectRevisionInput.source,
+        expectRevision: expectRevision,
+        currentRevision,
+      });
+      return;
+    }
+
+    const payloadForNormalize = stripClientMetaFromPayload(parsed);
+    const normalized = parseAndNormalizeWidgetsPayload(payloadForNormalize);
     if (!normalized.ok) {
       sendJson(res, normalized.status, {
         error: normalized.error,
@@ -510,16 +863,42 @@ async function handlePutWidgets(req, res) {
       return;
     }
 
+    const incomingFp = computeContentFingerprint(normalized.value);
+    const diskFp = computeContentFingerprint(diskDoc);
+
+    if (incomingFp === diskFp) {
+      console.log('[api] PUT /api/widgets skipped (no-op; semantic content unchanged)', {
+        schemaVersion: diskDoc.schemaVersion,
+        widgetsCount: diskDoc.widgets.length,
+        toolsWidgetsCount: diskDoc.toolsWidgets.length,
+        toolsLandingWidgetsCount: diskDoc.toolsLandingWidgets.length,
+        revision: `${currentRevision.slice(0, 12)}…`,
+        bodyBytes: body.length,
+      });
+      sendJson(res, 200, {
+        ...diskDoc,
+        revision: currentRevision,
+        skipped: true,
+      });
+      return;
+    }
+
     console.log('[api] PUT /api/widgets ? payload accepted', {
       schemaVersion: normalized.value.schemaVersion,
       widgetsCount: normalized.value.widgets.length,
       toolsWidgetsCount: normalized.value.toolsWidgets.length,
+      toolsLandingWidgetsCount: normalized.value.toolsLandingWidgets.length,
       updatedAt: normalized.value.updatedAt,
       path: WIDGETS_PATH,
       bodyBytes: body.length,
     });
     await queueWidgetPersist(normalized.value);
-    sendJson(res, 200, normalized.value);
+    const newRevision = computeDocumentRevision(normalized.value);
+    sendJson(res, 200, {
+      ...normalized.value,
+      revision: newRevision,
+      skipped: false,
+    });
   } catch (error) {
     const status = error && Number.isInteger(error.status) ? error.status : 500;
     console.error('[api] PUT /api/widgets FAILED', {
@@ -564,6 +943,14 @@ const server = http.createServer((req, res) => {
         return;
       }
       handleConfig(res);
+      break;
+
+    case '/api/widgets/ack':
+      if (req.method !== 'POST') {
+        sendJson(res, 405, { error: 'Method not allowed', detail: 'Use POST /api/widgets/ack' });
+        return;
+      }
+      void handlePostWidgetsAck(req, res);
       break;
 
     case '/api/widgets':

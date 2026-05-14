@@ -1,6 +1,101 @@
 # Team Lead Status
 
-Date: 2026-05-13
+Date: 2026-05-14
+
+### Client direction ? Export / import revision contract hardening (2026-05-14)
+
+**Status:** Frontend implementation complete, QA in-progress.
+
+**Priority:** P2 (operator recovery path broken on strict server contract).
+
+**Issue:** Import flow in `js/app.js` (`onWidgetImportFileSelected`) writes full document snapshots without supplying the current live revision token, causing `PUT /api/widgets` to fail with `EXPECT_REVISION_REQUIRED` and no recovery path for `STALE_REVISION` cases.
+
+**Product scope / contract:** Import must remain destructive (full overwrite path), but must still participate in concurrency control. Imported file content is data, not sync authority; revision enforcement must come from authoritative server state (`GET /api/widgets` / current ACK token).
+
+**Owner / files:** Frontend (`js/app.js`, possibly `index.html` if import message UX needs adjustment), QA (`qa-engineer`), and supporting docs in `team/assignments-debug-export-import-widgets.md`.
+
+**Acceptance (front-end contract):**
+- Resolve `/api/widgets` revision token before import write.
+- Send `expectRevision` in request body for all import writes (compatibility headers allowed).
+- Re-fetch or block on stale/missing token before write attempt.
+- On `STALE_REVISION`, show explicit user-facing recovery guidance (re-fetch/retry flow) and avoid blindly overwriting local state.
+
+**Definition of done:** `onWidgetImportFileSelected` imports without 400 `EXPECT_REVISION_REQUIRED`, and import success/failure messages reflect concurrency outcomes before local cache replacement.
+
+**Execution status (2026-05-14):**
+- **Frontend Dev (`frontend-senior-dev`):** Complete. Import now resolves authoritatively and writes with `expectRevision`, with `STALE_REVISION` guidance.
+- **QA:** `Pass with notes` (static review, interactive live-stack verification for `EXPECT_REVISION_REQUIRED` / stale race still recommended).
+- **Team Lead next:** close after interactive validation on live `/api/widgets` path if runtime confirmation is required.
+
+### Client direction ? Fortnight calculator algorithm bug fix (2026-05-13)
+
+### Client direction ? Fortnight calculator algorithm bug fix (2026-05-13)
+
+**Status:** Delegated ? Frontend implementation, then QA.
+
+**Priority:** P1 (produces incorrect line numbers for all non-start-date targets when FN start is a Sunday ? normal usage).
+
+**Root cause:** `countFortnightAdvancingSundays` starts its cursor the day *after* `startDate`, so a Sunday FN start date is never counted as Sunday #1. Every advance is off by one Sunday relative to correct behaviour.
+
+**Fix (client-specified algorithm):**
+1. Find first Sunday on or after `fnStartDate` (the anchor). If start IS a Sunday, it is Sunday #1.
+2. Count Sundays from anchor through `targetDate` (step by 7 days; inclusive both ends).
+3. `stepCount = Math.floor(count / 2)` ? Sundays #2, #4, #6 ? each advance the line by 1.
+4. Existing modular wrap (`rotateFrom + ((relativeStart + stepCount) % cycleLength)`) is correct; keep it.
+
+**Files:** `js/widgets/fortnight-tools.js` only ? remove `countFortnightAdvancingSundays`, replace `calculateLine` with the corrected single function. No store changes.
+
+**QA spot-checks (from client):**
+- FN start = Sunday, target = same day ? `lineAtStart` (no change)
+- FN start = Sunday, target = next Sunday ? `lineAtStart + 1`
+- FN start = Wednesday, target = first Sunday after ? `lineAtStart` (only 1 Sunday, no step)
+- FN start = Wednesday, target = second Sunday after ? `lineAtStart + 1`
+- Wrap case: `lineAtStart = rotateTo`, next advance ? wraps to `rotateFrom`
+- Target before start ? `lineAtStart`
+
+**Assignment:** inline (no separate assignment file required; single-file, client-specified exact replacement).
+
+**Execution status (2026-05-13):**
+- **Frontend Dev:** Complete ? `countFortnightAdvancingSundays` removed; `calculateLine` replaced with anchor-based algorithm in `js/widgets/fortnight-tools.js`.
+- **QA:** **Pass** ? all 6 spot-check cases verified correct by `qa-engineer`. No findings. Sign-off granted.
+
+**Team Lead sign-off:** Cycle closed. Fix is verified and ready to commit/merge.
+
+---
+
+### Client direction ? Debug: force retrieve from server (2026-05-13)
+
+**Status:** Delegated ? Frontend implementation, then QA.
+
+**Priority:** P2 (debug / recovery utility; supports recovering from stale shell cache without wiping user data).
+
+**Scope:** Add a **Force retrieve from server** control on the **Debug** tab only. On activate, forcibly refresh **same-origin** shell assets (HTML, CSS, JS, PWA precache targets) so the browser shows **network-current** content, bypassing **stale Cache Storage / SW-served shell** as appropriate. **Do not** clear `localStorage` / widget payloads unless product later asks. **`/api/`** must remain uncached by SW per existing architecture.
+
+**Assignment:** `team/assignments-debug-force-retrieve.md`
+
+**Owners:** **Frontend** ? `index.html`, `js/app.js`, optional `css/style.css`, `team/style-guide.md` if patterns change. **Backend** ? verify-only (no `Task`) unless implementation requires `sw.js` `message` coupling. **QA** ? interactive matrix in assignment after code lands.
+
+**Risks:** Cache clear + reload is usually sufficient under network-first SW; **full SW unregister** is heavier (registration flicker, offline shell until precache repopulates) ? default to **cache delete + reload** unless stuck-controller edge case requires unregister. User should expect a **full page reload** (in-flight UI state resets; persisted widget data remains).
+
+**Next:** `frontend-senior-dev` delivers; `qa-engineer` runs ?QA matrix; Team Lead sign-off after verdict.
+
+**Execution status (this workspace, 2026-05-13):** `Task` ? `frontend-senior-dev` reported a completed implementation (footer button, `forceShellRetrieveFromServer`, style guide). **`rg`/file check on `N:\\web_app` found no `forceShellRetrieve` / ?Force retrieve? strings** ? treat implementation as **pending merge** or **subagent isolation** until confirmed in git. `Task` ? `qa-engineer` ran in parallel and correctly returned **Blocked (pending implementation)** against this tree; **rerun QA after code is present**.
+
+### Client direction ? Fortnight calculator UX ? calculate-gated (2026-05-13)
+
+**Status:** Delegated ? Frontend implementation, then QA.
+
+**Priority:** P1 (Fortnight primary Tools utility).
+
+**Scope:** Free-form field entry (no restrictive `min`/`max` blocking; no per-keystroke clamp/normalize). Explicit **Calculate** validates inputs; on error, clear user-facing message and **no** misleading outcome sentence; on success, same sentence pattern as today (`On {date} you will be on line {n}`). **Persistence (Team Lead decision):** persist **`fortnightState` only after successful Calculate** (normalized snapshot); drafts stay in-widget until then so refresh does not surprise users with clamped values they never submitted. Out of scope: changing the fortnight algorithm.
+
+**Assignment:** `team/assignments-fortnight-calculator-ux.md`
+
+**Files:** `js/widgets/fortnight-tools.js`; `js/store.js` only if `mergeFortnightState`/serialization needs alignment; `team/style-guide.md` if visible copy/control patterns change.
+
+**Context preserved:** Earlier storage answer stands ? Tools landing migration/resave only; **no** global widget wipe implied by this work.
+
+**Next:** `frontend-senior-dev` delivers; `qa-engineer` interactive pass (free type, bad/good Calculate, refresh persistence); Team Lead sign-off after QA verdict.
 
 ### Client direction ? Tools tab Fortnight calculator (2026-05-13)
 
@@ -1013,6 +1108,67 @@ docker compose logs --tail=40 api
 - **QA:** assigned to qa-engineer after implementation.
 - **Commit/rebase:** blocked until QA signoff and final Lead review.
 
+---
+
+## Client direction ? Sync toolsLandingWidgets to/from server (2026-05-13)
+
+**Status:** Delegated ? Frontend Dev (js/store.js, js/app.js); QA to follow.
+
+**Priority:** P1 ? fortnight calculator state is not round-tripping to the server at all; a fresh device or private tab will always reset to defaults even when the user has saved calculator inputs.
+
+**Scope:** Wire `toolsLandingWidgets` (the Tools tab fortnight calculator array) into the existing `/api/widgets` sync cycle on exactly the same path as home `widgets` and debug `toolsWidgets`. No new API endpoints; the server payload shape gains a `toolsLandingWidgets` key alongside the existing `widgets` and `toolsWidgets` keys.
+
+**Files:** `js/store.js`, `js/app.js` only. No backend change required (server already stores arbitrary top-level keys; `api/server.js` normalises rows so the new key will be preserved as-is).
+
+**Concrete tasks (Frontend):**
+
+1. **`store.js` ? `coerceWidgetsPayload`:** extract `toolsLandingWidgetsRaw` from `raw.toolsLandingWidgets` or `raw.data?.toolsLandingWidgets`; return it in the coerced object alongside existing fields.
+2. **`store.js` ? `getWidgetPayloadForApi`:** accept `options.toolsLandingWidgets`; when present, include `toolsLandingWidgets: normaliseToolsLandingRows(options.toolsLandingWidgets)` in the returned object.
+3. **`store.js` ? export `normaliseToolsLandingRows`:** currently not exported; add `export` keyword.
+4. **`store.js` ? `loadWidgetPayloadFromApi`:** read `toolsLandingWidgets` from the coerced payload; normalise with `normaliseToolsLandingRows`; return alongside existing fields (may be `null` when absent). Widen the early-return guard so `toolsLandingWidgets` alone (no `widgetsRaw`/`toolsWidgetsRaw`) is not discarded.
+5. **`app.js` ? import:** add `normaliseToolsLandingRows` to the named import block from `./store.js`.
+6. **`app.js` ? `pickServerPayload`:** add `toolsLandingWidgets` field: `Array.isArray(raw.toolsLandingWidgets) ? normaliseToolsLandingRows(raw.toolsLandingWidgets) : null` in all return branches that already carry `toolsWidgets`. Mirror same pattern for `raw.data?.toolsLandingWidgets` where applicable.
+7. **`app.js` ? `syncToServer`:** pass `toolsLandingWidgets: this.toolsLandingWidgets` to `getWidgetPayloadForApi`.
+8. **`app.js` ? `_reconcilePayloadLocally`:** extract `remoteToolsLandingWidgets` from payload; if truthy, apply to `this.toolsLandingWidgets`, call `this.persistToolsLandingWidgets({ sync: false })`, and `this.renderPageWidgets("tools")`. Mirror the existing `remoteToolsWidgets` apply block.
+9. **`app.js` ? `persistToolsLandingWidgets`:** wire into the deferred-sync cycle: set `_widgetsNeedSync = true` and call `persistWidgetsDeferredSync()` on the same path `persistWidgets` does (i.e. when `options.sync !== false`). Keep `saveToolsLandingWidgets` call for the `sync: false` branch.
+10. **`app.js` ? `reconcileServerWidgets`:** widen the validation guard (`if (!Array.isArray(payload.widgets))`) to also pass when `payload.toolsLandingWidgets` is present, so a server response containing only landing data is not discarded as invalid.
+
+**Acceptance:**
+- Changing fortnight calculator inputs and pressing Calculate triggers a debounced server PUT that includes `toolsLandingWidgets`.
+- On fresh load (cleared localStorage), the GET from `/api/widgets` populates the fortnight calculator state from the server response.
+- Existing home and debug sync behaviour is not regressed.
+- `persistToolsLandingWidgets` properly marks `_widgetsNeedSync` so sync fires.
+
+**Assignment:** inline (single 2-file scope, client-specified exact changes).
+
+**Execution status (2026-05-13):** Delegated to `frontend-senior-dev`. QA to follow after implementation lands.
+
+---
+
+### Client direction ? Debug: export / import server widget data (2026-05-13)
+
+**Status:** Delegated ? Frontend + Backend parallel; QA after implementation.
+
+**Priority:** P2 (operator backup / restore; lives beside **Force retrieve from server** in `#widget-sync-strip`).
+
+**Client scope:**
+
+- **Export:** Download a **single JSON file** containing the **current `/api/widgets` server document** (network GET, not a purely local snapshot).
+- **Import:** File picker, validate, **PUT to server** to **fully overwrite** persisted server data with the file contents, then align in-app state / `localStorage` with the written snapshot (same single-file round-trip).
+
+**Architecture resolution (Team Lead):**
+
+- **Server data** means the API-persisted widget document (`GET`/`PUT /api/widgets`), per `api/server.js` + named volume notes elsewhere in this log. **Not** a separate database.
+- **Product ambiguity (client):** Export **excludes unsynced local-only edits** by design in this slice; document that in UI copy or help text unless the client requests a merged export later.
+
+**Known implementation gap:** Server normalizer today must be extended so **`toolsLandingWidgets`** (and any other keys the app already PUTs) are **not stripped** on read/write; otherwise export/import cannot be a faithful round-trip.
+
+**Assignment file:** `team/assignments-debug-export-import-widgets.md`
+
+**Next:** `frontend-senior-dev` + `backend-senior-dev` in parallel; `qa-engineer` when both land.
+
+---
+
 ## QA outcome (cleanup track)
 
 **Verdict:** Pass with notes (`qa-engineer`).
@@ -1023,3 +1179,31 @@ docker compose logs --tail=40 api
 - Low risk: dormant bookmark path uses `innerHTML` with user-influenced label/icon values; security hardening can be deferred while dormant.
 
 **Sign-off recommendation:** static cycle is safe to proceed to commit/rebase, with interactive follow-up checks for migration matrix and legacy-layout behavior remaining.
+
+---
+
+## Client direction ? Widget sync revision token + diagnostics revalidation (2026-05-14)
+
+**Status:** In execution; Frontend and Backend implementation returned, QA pass complete with notes.
+
+**Priority:** P1 — prevent revision-contract write failures and restore actionable sync diagnostics.
+
+**Delegation package:** `team/assignments-widget-sync-revision-contract.md`
+
+**Owners and files**
+
+- Frontend (`frontend-senior-dev`) — `js/app.js`, `js/site-diagnostics.js`, `team/style-guide.md` (if needed)
+- Backend (`backend-senior-dev`) — `api/server.js`
+- QA (`qa-engineer`) — interactive matrix on live host
+
+**Outcome (as of this cycle):**
+
+- Frontend patch delivered `expectRevision` in body payload, preserved compatibility header path, and explicit sync diagnostics formatting.
+- Backend patch delivered accepted revision fields (`expectRevision`, `If-Match`) and explicit compatibility alias behavior.
+- QA reported functional `Pass with notes` for core bootstrap, post-ACK PUT, stale-revision visibility, and masking removal; one follow-up remains for direct in-session missing-token forcing evidence.
+
+**Definition of done (Team Lead close-out):**
+
+- Revision token in body + header compatibility remains stable across normal and keepalive PUT paths.
+- Diagnostics never regresses to `Widget sync save failed {}` masking.
+- QA interactive matrix has been documented with severity and sign-off recommendation; follow-up item tracked if we require a direct missing-token in-browser repro.

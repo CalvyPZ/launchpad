@@ -114,7 +114,8 @@
 
 ### Server sync (widgets)
 
-- Widget layout and content sync to `/api/widgets` in the background; there is **no** header strip or other in-UI sync status.
+- Widget layout and content sync to `/api/widgets` happens in the background via `/api/widgets` GET/ACK/PUT with `expectRevision` carried in the PUT body.
+- First-open `POST /api/widgets/ack` failures can hard-block outbound writes until a valid revision is available; in that state the debug strip/log must continue to show an explicit revision-basis message instead of an empty object.
 - The app persists to `launchpad_*` keys locally and reads from legacy `calvybots_*` keys when no canonical payload exists; failures to reach the server are logged to the console (`console.error`), not shown as app chrome.
 
 ## Motion
@@ -202,6 +203,7 @@ Align implementation with `js/widgets/todo.js`, `js/store.js`, and `css/style.cs
   - Warning: `#f59e0b` (`amber`) + `text-amber-400`.
   - Critical: `#ef4444` (`red`) + `text-red-400`.
 - Status rows show the probe label, detail text, and per-result timestamp; overall header uses `text-xs` uppercase label + status chip-like row.
+- Status also shows **Local time** in the header band: monospace tabular numbers, accent (`text-accent`), `en-US` `toLocaleTimeString` with hours/minutes/**seconds** (same options as the main Clock widget), updated every second with an interval cleared on `destroy()`.
 - Log renders a scrollable terminal-style stream, newest entries appended at the bottom and with auto-scroll when already pinned.
 - Log filtering is binary: `All` and `Warn + Error` (`warn`/`crit`/`error` filter), defaulting to `All`.
 - Console integration captures `warn` and `error` only (not `console.log`) with recursion guard and routes to diagnostics log only.

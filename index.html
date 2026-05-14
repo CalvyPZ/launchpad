@@ -272,12 +272,50 @@
               <span class="widget-sync-strip-value" x-text="widgetSyncStripRetrieveLabel()"></span>
             </p>
           </div>
-          <div class="widget-sync-strip-actions" x-show="currentPage === 'debug'">
+          <div
+            id="widget-sync-strip-actions"
+            class="widget-sync-strip-actions"
+            x-show="currentPage === 'debug'"
+          >
+            <div class="widget-sync-strip-doc-row">
+              <button
+                type="button"
+                class="widget-sync-strip-force-btn btn-soft"
+                @click="exportWidgetsDocumentFromServer()"
+                :disabled="widgetDocExchangeControlsDisabled()"
+                :aria-busy="widgetExportBusy ? 'true' : 'false'"
+                title="Downloads the live GET /api/widgets JSON (server snapshot). Unsynced local-only edits are not included until they are pushed to the server."
+              >
+                <span x-text="widgetExportBusy ? 'Exporting…' : 'Export data'"></span>
+              </button>
+              <button
+                type="button"
+                class="widget-sync-strip-force-btn btn-soft"
+                @click="openWidgetImportFilePicker()"
+                :disabled="widgetDocExchangeControlsDisabled()"
+                :aria-busy="widgetImportBusy ? 'true' : 'false'"
+                aria-label="Import widget document from a JSON file: overwrites the server document and this browser’s cached layouts after confirmation"
+              >
+                <span x-text="widgetImportBusy ? 'Importing…' : 'Import data'"></span>
+              </button>
+              <input
+                type="file"
+                x-ref="widgetImportFileInput"
+                class="sr-only"
+                accept="application/json,.json"
+                aria-hidden="true"
+                tabindex="-1"
+                @change="onWidgetImportFileSelected($event)"
+              />
+            </div>
+            <p class="widget-sync-strip-doc-hint">
+              Export reflects the current server document only; unsynced local edits stay in the browser until a successful sync.
+            </p>
             <button
               type="button"
               class="widget-sync-strip-force-btn btn-soft"
               @click="forceShellRetrieveFromServer()"
-              :disabled="forceShellRetrieveBusy"
+              :disabled="forceShellRetrieveBusy || widgetExportBusy || widgetImportBusy || _widgetsSyncInFlight || _widgetsBootstrapInFlight"
               :aria-busy="forceShellRetrieveBusy ? 'true' : 'false'"
               aria-label="Force retrieve app shell from server: clear Cache Storage for this site, then reload (widget data in local storage is kept)"
             >
@@ -288,6 +326,12 @@
               role="alert"
               x-show="forceShellRetrieveError"
               x-text="forceShellRetrieveError"
+            ></p>
+            <p
+              class="widget-sync-strip-force-error"
+              role="alert"
+              x-show="widgetDocumentExchangeError"
+              x-text="widgetDocumentExchangeError"
             ></p>
           </div>
         </div>

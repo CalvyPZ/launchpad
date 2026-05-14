@@ -472,7 +472,7 @@ export function getProbeResults() {
 
 /**
  * Initial GET /api/widgets (one-shot reconcile on load).
- * @param {'attempt'|'offline'|'invalid'|'success'|'error'} phase
+ * @param {'attempt'|'offline'|'invalid'|'success'|'error'|'ack_pending'|'ack_success'|'ack_error'} phase
  * @param {string} [detail]
  */
 export function reportWidgetSyncRetrieve(phase, detail = "") {
@@ -514,6 +514,28 @@ export function reportWidgetSyncRetrieve(phase, detail = "") {
         at,
       };
       break;
+    case "ack_pending":
+      widgetSyncRetrieveState = {
+        status: "warn",
+        detail: detail && detail.trim() ? detail.trim() : "POST /api/widgets/ack in progress…",
+        at,
+      };
+      appendLog("info", "sync", "Widgets ACK started", detail || "/api/widgets/ack");
+      break;
+    case "ack_success": {
+      const ad = detail && detail.trim() ? detail.trim() : "Server snapshot acknowledged";
+      widgetSyncRetrieveState = { status: "ok", detail: ad, at };
+      appendLog("info", "sync", "Widgets ACK completed", ad);
+      break;
+    }
+    case "ack_error":
+      widgetSyncRetrieveState = {
+        status: "crit",
+        detail: detail || "ACK request failed",
+        at,
+      };
+      appendLog("error", "sync", "Widgets ACK failed", detail || "");
+      break;
     default:
       break;
   }
@@ -522,19 +544,32 @@ export function reportWidgetSyncRetrieve(phase, detail = "") {
 
 /**
  * Push / queue state from Alpine dashboard (live).
- * @param {{ online?: boolean, _widgetsNeedSync?: boolean, _widgetsSyncInFlight?: boolean, _widgetsSyncTimer?: ReturnType<typeof setTimeout> | null }} dashboard
+ * @param {{ online?: boolean, _widgetsNeedSync?: boolean, _widgetsSyncInFlight?: boolean, _widgetsSyncTimer?: ReturnType<typeof setTimeout> | null, _widgetsWriteGateOpen?: boolean, _widgetsBootstrapInFlight?: boolean, _widgetsAckError?: string | null }} dashboard
  */
 export function reportWidgetSyncPushFromDashboard(dashboard) {
   const online = dashboard.online !== false;
   const needSync = Boolean(dashboard._widgetsNeedSync);
   const inFlight = Boolean(dashboard._widgetsSyncInFlight);
   const timerPending = Boolean(dashboard._widgetsSyncTimer);
+  const writeGateOpen = dashboard._widgetsWriteGateOpen === true;
+  const bootstrapInFlight = Boolean(dashboard._widgetsBootstrapInFlight);
+  const ackErr = typeof dashboard._widgetsAckError === "string" ? dashboard._widgetsAckError.trim() : "";
   const at = isoNow();
 
   let status = /** @type {'ok'|'warn'|'crit'} */ ("ok");
   let detail = "Server copy matches local";
 
-  if (!online && needSync) {
+  if (!writeGateOpen && online) {
+    status = "warn";
+    if (ackErr) {
+      detail = `Outbound writes blocked — ${ackErr}`;
+    } else if (bootstrapInFlight) {
+      detail = "Outbound writes blocked — first-open bootstrap in progress";
+    } else {
+      detail =
+        "Outbound writes blocked until POST /api/widgets/ack succeeds (first-open contract). Reload when the API is updated.";
+    }
+  } else if (!online && needSync) {
     status = "warn";
     detail = "Local changes waiting — cannot upload while offline";
   } else if (lastWidgetPushFailure && needSync && !inFlight) {
@@ -582,10 +617,34 @@ export function reportWidgetSyncPushEvent(phase, detail = "", dashboard = null) 
   }
 }
 
+function formatErrorForConsoleArg(error) {
+  const payload = {
+    name: typeof error.name === "string" ? error.name : "Error",
+    message: typeof error.message === "string" ? error.message : "",
+  };
+  if (error.stack) payload.stack = `${error.stack}`;
+  if (error.detail != null) payload.detail = error.detail;
+  if (error.status != null) payload.status = `${error.status}`;
+  if (error.code != null) payload.code = error.code;
+  if (error.body != null) {
+    if (typeof error.body === "string") {
+      payload.body = error.body;
+    } else {
+      try {
+        payload.body = JSON.stringify(error.body);
+      } catch {
+        payload.body = String(error.body);
+      }
+    }
+  }
+  return JSON.stringify(payload);
+}
+
 function formatConsoleArgs(args) {
   return args
     .map((a) => {
       if (typeof a === "string") return a;
+      if (a instanceof Error) return formatErrorForConsoleArg(a);
       try {
         return JSON.stringify(a);
       } catch {

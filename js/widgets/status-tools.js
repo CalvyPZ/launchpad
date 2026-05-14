@@ -42,6 +42,14 @@ export function render(container, _ctx) {
           <span data-diag-updated class="text-xs text-text-3"></span>
         </div>
       </div>
+      <div class="flex flex-col items-end sm:items-start min-w-0">
+        <p class="text-xs uppercase tracking-wide text-text-3">Local time</p>
+        <time
+          data-diag-current-time
+          class="mt-0.5 font-mono tabular-nums text-base font-medium text-accent tracking-tight"
+          aria-live="polite"
+        ></time>
+      </div>
       <button
         type="button"
         data-diag-refresh
@@ -55,8 +63,24 @@ export function render(container, _ctx) {
 
   const overallEl = container.querySelector("[data-diag-overall]");
   const updatedEl = container.querySelector("[data-diag-updated]");
+  const currentTimeEl = container.querySelector("[data-diag-current-time]");
   const rowsEl = container.querySelector("[data-diag-rows]");
   const refreshBtn = container.querySelector("[data-diag-refresh]");
+
+  function updateCurrentTime() {
+    if (!(currentTimeEl instanceof HTMLElement)) return;
+    const now = new Date();
+    currentTimeEl.setAttribute("datetime", now.toISOString());
+    currentTimeEl.textContent = now.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: true,
+    });
+  }
+
+  updateCurrentTime();
+  let timeIntervalId = window.setInterval(updateCurrentTime, 1000);
 
   function renderRows(rows) {
     if (!(rowsEl instanceof HTMLElement)) return;
@@ -103,6 +127,10 @@ export function render(container, _ctx) {
   return {
     destroy() {
       unsub();
+      if (timeIntervalId != null) {
+        window.clearInterval(timeIntervalId);
+        timeIntervalId = null;
+      }
       if (refreshBtn instanceof HTMLElement) {
         refreshBtn.removeEventListener("click", onRefresh);
       }
